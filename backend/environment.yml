@@ -1,0 +1,12 @@
+# Conda 环境：后端 API（Flask + pypdf）
+# 创建：conda env create -f environment.yml
+# 激活：conda activate freeyourpdf
+name: freeyourpdf
+channels:
+  - defaults
+dependencies:
+  - python>=3.8
+  - pip
+  - pip:
+    - flask>=3.0.0
+    - pypdf>=4.0.0
