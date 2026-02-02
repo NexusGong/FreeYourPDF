@@ -1,4 +1,8 @@
 backend/.venv/
+backend/data/
+*.db
 __pycache__/
 *.pyc
 recover.html
+.env
+.env.local

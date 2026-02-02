@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0f12">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>FreeYourPDF - PDF 加密 / 解锁 / 体积优化</title>
+  <link rel="stylesheet" href="css/style.css?v=3">
+  <!-- 前后端分开启动时，后端 API 地址（默认 5001，避免 macOS 上 5000 被 AirPlay 占用） -->
+  <script>window.FREEYOURPDF_API_BASE = 'http://localhost:5001';</script>
+</head>
+<body>
+  <!-- 主站内容，非 #admin 时显示 -->
+  <div class="page" id="mainPage">
+    <header class="header">
+      <div class="header-top">
+        <h1 class="logo">FreeYourPDF</h1>
+        <div class="auth-area" id="authArea">
+          <div class="auth-user-wrap" id="authUserWrap" aria-hidden="true">
+            <button type="button" class="auth-user-trigger" id="authUserTrigger" aria-expanded="false" aria-haspopup="true">
+              <span class="auth-user-avatar" id="authUserAvatarWrap">
+                <img id="authUserAvatarImg" src="" alt="" class="auth-user-avatar-img" style="display:none;">
+                <span id="authUserAvatarEmoji" class="auth-user-avatar-emoji" style="display:none;"></span>
+              </span>
+              <span class="auth-user" id="authUser"></span>
+              <span class="auth-user-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="auth-user-dropdown" id="authUserDropdown" role="menu" aria-hidden="true">
+              <button type="button" class="auth-dropdown-item" id="dropdownProfile" role="menuitem">个人资料</button>
+              <button type="button" class="auth-dropdown-item" id="dropdownRecharge" role="menuitem">充值支付</button>
+              <button type="button" class="auth-dropdown-item" id="dropdownChangePassword" role="menuitem">修改密码</button>
+              <div class="auth-dropdown-divider"></div>
+              <button type="button" class="auth-dropdown-item auth-dropdown-item-danger" id="dropdownLogout" role="menuitem">退出登录</button>
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="btnAuth">登录/注册</button>
+        </div>
+      </div>
+      <p class="tagline">PDF 加密 · 解锁 · 体积优化</p>
+      <div class="usage-row" id="usageRow">
+        <div class="usage usage-encrypt">
+          <span class="usage-label usage-label-long">加密</span>
+          <span class="usage-label usage-label-short" aria-hidden="true">加密</span>
+          <span class="usage-value" id="usageValueEncrypt">5</span>
+          <span class="usage-total" id="usageTotalEncrypt">/ 5</span>
+        </div>
+        <div class="usage usage-unlock">
+          <span class="usage-label usage-label-long">解锁</span>
+          <span class="usage-label usage-label-short" aria-hidden="true">解锁</span>
+          <span class="usage-value" id="usageValueUnlock">5</span>
+          <span class="usage-total" id="usageTotalUnlock">/ 5</span>
+        </div>
+        <div class="usage usage-compress">
+          <span class="usage-label usage-label-long">体积优化</span>
+          <span class="usage-label usage-label-short" aria-hidden="true">体积</span>
+          <span class="usage-value" id="usageValueCompress">5</span>
+          <span class="usage-total" id="usageTotalCompress">/ 5</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <nav class="tabs" id="mainTabs" role="tablist">
+        <button type="button" class="tab is-active" id="tabEncrypt" role="tab" aria-selected="true" data-tab="encrypt">加密</button>
+        <button type="button" class="tab" id="tabUnlock" role="tab" aria-selected="false" data-tab="unlock">解锁</button>
+        <button type="button" class="tab" id="tabCompress" role="tab" aria-selected="false" data-tab="compress">体积优化</button>
+      </nav>
+
+      <section class="card" id="uploadCard">
+        <h2 class="card-title-dynamic" id="cardTitle">选择 PDF 文件（加密）</h2>
+        <p class="card-desc card-desc-dynamic" id="cardDesc">支持多选，可对未加密的 PDF 进行加密。<strong>全部在您设备本地处理，文件不上传服务器，隐私与安全有保障。</strong></p>
+        <label class="file-label">
+          <input type="file" id="pdfInput" accept=".pdf" multiple class="file-input">
+          <span class="drop-zone" id="dropZone">
+            <span class="drop-zone-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="12" y1="18" x2="12" y2="12"/>
+                <line x1="9" y1="15" x2="15" y2="15"/>
+              </svg>
+            </span>
+            <span class="drop-zone-text" id="pdfInputText">点击选择或拖入多个 PDF</span>
+            <span class="drop-zone-hint">支持多选，仅处理 .pdf 文件</span>
+          </span>
+        </label>
+        <div class="file-list" id="fileList"></div>
+        <p class="hint" id="globalHint"></p>
+      </section>
+
+      <!-- 充值：登录后可购买次数 -->
+      <section class="card card-extra" id="extraSection" aria-hidden="true">
+        <h2>获取更多次数</h2>
+        <p class="card-desc">免费次数用完后，登录后可购买解锁/加密/体积优化次数。</p>
+        <div id="rechargeContent" class="recharge-content">
+          <p class="recharge-login-hint" id="rechargeLoginHint">请先<button type="button" class="btn btn-link" id="rechargeLoginBtn">登录</button>后再充值。</p>
+          <div class="recharge-packs" id="rechargePacks" style="display:none;">
+            <p class="recharge-pack-label">选择套餐（加密/解锁/体积优化 三档合一）</p>
+            <div class="pack-list pack-list-combo" id="packListCombo"></div>
+            <div class="recharge-order" id="rechargeOrder" style="display:none;">
+              <p><strong>订单号：</strong><span id="orderTransactionId"></span></p>
+              <p><strong>金额：</strong><span id="orderAmount"></span> 元</p>
+              <p><strong>备注：</strong>付款时请填写订单号</p>
+              <button type="button" class="btn btn-primary" id="btnConfirmPaid">我已支付</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p></p>
+    </footer>
+  </div>
+
+  <!-- 登录 / 注册弹窗 -->
+  <div class="modal-overlay" id="authModal" aria-hidden="true">
+    <div class="modal auth-modal">
+      <h3 class="modal-title" id="authModalTitle">登录</h3>
+      <nav class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab is-active" id="authTabLogin" role="tab" aria-selected="true" data-auth-tab="login">登录</button>
+        <button type="button" class="auth-tab" id="authTabRegister" role="tab" aria-selected="false" data-auth-tab="register">注册</button>
+      </nav>
+
+      <div class="auth-panel" id="authPanelLogin" data-auth-panel="login">
+        <div class="auth-login-method">
+          <button type="button" class="auth-subtab is-active" data-login-method="password">用户名/邮箱 + 密码</button>
+          <button type="button" class="auth-subtab" data-login-method="code">邮箱验证码登录</button>
+        </div>
+        <div class="auth-form auth-form-login-password" id="authFormLoginPassword">
+          <label class="modal-label" for="loginLogin">用户名或邮箱</label>
+          <input type="text" id="loginLogin" class="input" placeholder="用户名或邮箱" autocomplete="off">
+          <label class="modal-label" for="loginPassword">密码</label>
+          <input type="password" id="loginPassword" class="input" placeholder="密码" autocomplete="off">
+          <button type="button" class="btn btn-primary btn-block" id="btnLoginSubmit">登录</button>
+        </div>
+        <div class="auth-form auth-form-login-code" id="authFormLoginCode" style="display:none;">
+          <label class="modal-label" for="loginCodeEmail">邮箱</label>
+          <div class="input-row">
+            <input type="email" id="loginCodeEmail" class="input" placeholder="邮箱" autocomplete="off">
+            <button type="button" class="btn btn-secondary" id="btnLoginSendCode">获取验证码</button>
+          </div>
+          <label class="modal-label" for="loginCode">验证码</label>
+          <input type="text" id="loginCode" class="input" placeholder="验证码" autocomplete="off" maxlength="6">
+          <button type="button" class="btn btn-primary btn-block" id="btnLoginByCodeSubmit">验证码登录</button>
+        </div>
+      </div>
+
+      <div class="auth-panel" id="authPanelRegister" data-auth-panel="register" style="display:none;">
+        <label class="modal-label" for="regEmail">邮箱</label>
+        <div class="input-row">
+          <input type="email" id="regEmail" class="input" placeholder="邮箱" autocomplete="off">
+          <button type="button" class="btn btn-secondary" id="btnRegSendCode">获取验证码</button>
+        </div>
+        <label class="modal-label" for="regCode">验证码</label>
+        <input type="text" id="regCode" class="input" placeholder="验证码" autocomplete="off" maxlength="6">
+        <label class="modal-label" for="regUsername">用户名</label>
+        <input type="text" id="regUsername" class="input" placeholder="2～32 位，字母/数字/下划线/中文" autocomplete="off">
+        <label class="modal-label" for="regPassword">密码</label>
+        <input type="password" id="regPassword" class="input" placeholder="至少 6 位" autocomplete="off">
+        <label class="modal-label" for="regPasswordConfirm">确认密码</label>
+        <input type="password" id="regPasswordConfirm" class="input" placeholder="再次输入密码" autocomplete="off">
+        <button type="button" class="btn btn-primary btn-block" id="btnRegisterSubmit">注册</button>
+      </div>
+
+      <p class="modal-hint modal-hint-error" id="authModalHint" aria-hidden="true"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="authModalCancel">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 个人资料弹窗 -->
+  <div class="modal-overlay" id="profileModal" aria-hidden="true">
+    <div class="modal profile-modal profile-modal-redesign">
+      <h3 class="modal-title">个人资料</h3>
+      <div class="profile-section">
+        <h4 class="profile-section-title">个人信息</h4>
+        <div class="profile-info-row">
+          <span class="profile-info-label">用户名</span>
+          <input type="text" id="profileUsername" class="input profile-input-inline" placeholder="2～32 字符" maxlength="32" autocomplete="off">
+        </div>
+        <div class="profile-info-row">
+          <span class="profile-info-label">邮箱</span>
+          <input type="text" id="profileEmail" class="input profile-input-inline profile-input-readonly" readonly placeholder="邮箱" autocomplete="off">
+        </div>
+        <div class="profile-info-row">
+          <span class="profile-info-label">昵称</span>
+          <input type="text" id="profileNickname" class="input profile-input-inline" placeholder="昵称" maxlength="50" autocomplete="off">
+        </div>
+        <div class="profile-info-row profile-avatar-row">
+          <span class="profile-info-label">头像</span>
+          <div class="profile-avatar-block">
+            <div class="profile-avatar-preview-row">
+              <div class="profile-avatar-preview" id="profileAvatarPreview">
+                <img id="profileAvatarImg" src="" alt="" class="profile-avatar-img" style="display:none;">
+                <span class="profile-avatar-emoji" id="profileAvatarEmoji"></span>
+                <span class="profile-avatar-placeholder" id="profileAvatarPlaceholder">未选</span>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm profile-avatar-toggle-btn" id="profileAvatarToggleBtn">选择头像</button>
+            </div>
+            <div class="profile-avatar-library-wrap" id="profileAvatarLibraryWrap" style="display:none;">
+              <p class="profile-avatar-label">从下方选择头像</p>
+              <div class="profile-avatar-library" id="profileAvatarLibrary"></div>
+            </div>
+          </div>
+        </div>
+        <div class="profile-info-row">
+          <span class="profile-info-label">注册时间</span>
+          <span class="profile-info-value" id="profileCreatedAt"></span>
+        </div>
+      </div>
+      <div class="profile-section">
+        <h4 class="profile-section-title">使用情况</h4>
+        <div class="profile-usage-grid">
+          <div class="profile-usage-item">
+            <span class="profile-usage-label">加密</span>
+            <span class="profile-usage-value" id="profileQuotaEncrypt">—</span>
+            <span class="profile-usage-total" id="profileQuotaEncryptTotal">/ —</span>
+          </div>
+          <div class="profile-usage-item">
+            <span class="profile-usage-label">解锁</span>
+            <span class="profile-usage-value" id="profileQuotaUnlock">—</span>
+            <span class="profile-usage-total" id="profileQuotaUnlockTotal">/ —</span>
+          </div>
+          <div class="profile-usage-item">
+            <span class="profile-usage-label">体积优化</span>
+            <span class="profile-usage-value" id="profileQuotaCompress">—</span>
+            <span class="profile-usage-total" id="profileQuotaCompressTotal">/ —</span>
+          </div>
+        </div>
+      </div>
+      <p class="modal-hint profile-modal-hint" id="profileModalHint" aria-hidden="true"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="profileModalCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="profileModalSave">保存资料</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 修改密码弹窗 -->
+  <div class="modal-overlay" id="changePasswordModal" aria-hidden="true">
+    <div class="modal change-password-modal">
+      <h3 class="modal-title">修改密码</h3>
+      <label class="modal-label" for="changePasswordCurrent">当前密码</label>
+      <input type="password" id="changePasswordCurrent" class="input" placeholder="当前密码" autocomplete="off">
+      <label class="modal-label" for="changePasswordNew">新密码</label>
+      <input type="password" id="changePasswordNew" class="input" placeholder="至少 6 位" autocomplete="off">
+      <p class="modal-hint change-password-hint" id="changePasswordHint" aria-hidden="true"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="changePasswordModalCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="changePasswordModalSubmit">确认修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 充值支付弹窗 -->
+  <div class="modal-overlay" id="rechargeModal" aria-hidden="true">
+    <div class="modal pay-modal">
+      <div class="pay-modal-header">
+        <h3 class="pay-modal-title">充值次数</h3>
+        <p class="pay-modal-desc">选择套餐后确认，扫码支付并填写订单号，点击「我已支付」即可到账。</p>
+      </div>
+      <p class="pay-plans-label">选择套餐</p>
+      <div class="pay-plan-list" id="rechargeCards"></div>
+      <div class="pay-confirm-wrap" id="rechargeConfirmWrap" style="display:none;">
+        <p class="pay-confirm-label">已选：<span id="rechargeSelectedLabel"></span></p>
+        <button type="button" class="btn btn-primary pay-confirm-btn" id="rechargeConfirmSelectBtn">确认选择</button>
+      </div>
+      <div class="pay-order-panel" id="rechargeOrderPanel" style="display:none;">
+        <div class="pay-order-title">支付码</div>
+        <div class="pay-qr-box" id="rechargeQrPlaceholder">
+          <span class="pay-qr-tip">请使用支付宝扫码付款</span>
+          <p class="pay-qr-account" id="rechargeQrAccount"></p>
+        </div>
+        <div class="pay-order-title">订单信息</div>
+        <p class="pay-order-row pay-order-row-id"><strong>订单号</strong><span id="rechargeModalTransactionId"></span><button type="button" class="pay-copy-btn" id="rechargeCopyOrderId" title="复制订单号">复制</button></p>
+        <p class="pay-order-row"><strong>金额</strong><span id="rechargeModalAmount" class="pay-order-amount"></span> 元</p>
+        <p class="pay-order-remark">付款时请在备注中填写上述订单号</p>
+        <button type="button" class="btn btn-primary pay-paid-btn" id="rechargeModalConfirmPaid">我已支付</button>
+      </div>
+      <div class="pay-modal-footer">
+        <button type="button" class="btn btn-secondary" id="rechargeModalClose">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 管理后台全页：仅当管理员访问 #admin 时显示 -->
+  <div id="adminPage" class="admin-page" style="display:none;">
+    <header class="admin-page-header">
+      <h1 class="admin-page-title">管理后台</h1>
+      <a href="#" class="admin-page-back" id="adminPageBack">返回首页</a>
+    </header>
+    <nav class="admin-page-tabs" role="tablist">
+      <button type="button" class="admin-page-tab is-active" data-admin-tab="overview">数据概览</button>
+      <button type="button" class="admin-page-tab" data-admin-tab="access">访问记录</button>
+      <button type="button" class="admin-page-tab" data-admin-tab="users">用户管理</button>
+      <button type="button" class="admin-page-tab" data-admin-tab="usage">使用记录</button>
+      <button type="button" class="admin-page-tab" data-admin-tab="monitor">实时监控</button>
+      <button type="button" class="admin-page-tab" data-admin-tab="payments">支付记录</button>
+      <button type="button" class="admin-page-tab" data-admin-tab="payment-test">支付测试</button>
+      <button type="button" class="admin-page-tab" data-admin-tab="cost">成本监控</button>
+    </nav>
+    <main class="admin-page-main">
+      <div class="admin-panel is-active" id="adminPanelOverview" data-admin-panel="overview">
+        <h2 class="admin-section-title">数据概览</h2>
+        <p class="admin-section-desc">整体统计与近 7 日趋势（非实时，切换到此页时刷新）</p>
+        <div class="admin-stats-cards admin-stats-cards-overview">
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatUsers">0</span><span class="admin-stat-label">总用户数</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatPayments">0</span><span class="admin-stat-label">支付笔数</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatRevenue">0</span><span class="admin-stat-label">总收入（元）</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatVisits">0</span><span class="admin-stat-label">总访问量</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatUsageCount">0</span><span class="admin-stat-label">总使用次数</span></div>
+        </div>
+        <h3 class="admin-subtitle">近 7 日使用趋势</h3>
+        <div class="admin-trend-wrap" id="adminUsageTrendWrap"><table class="admin-table admin-trend-table"><thead><tr><th>日期</th><th>使用次数</th></tr></thead><tbody id="adminUsageTrendBody"></tbody></table></div>
+        <h3 class="admin-subtitle">近 7 日访问趋势</h3>
+        <div class="admin-trend-wrap" id="adminVisitTrendWrap"><table class="admin-table admin-trend-table"><thead><tr><th>日期</th><th>访问量</th></tr></thead><tbody id="adminVisitTrendBody"></tbody></table></div>
+      </div>
+      <div class="admin-panel" id="adminPanelAccess" data-admin-panel="access" style="display:none;">
+        <h2 class="admin-section-title">访问记录</h2>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>IP</th><th>位置</th><th>设备</th><th>用户</th></tr></thead><tbody id="adminAccessBody"></tbody></table></div>
+        <p class="admin-pager" id="adminAccessPager">暂无数据</p>
+      </div>
+      <div class="admin-panel" id="adminPanelUsers" data-admin-panel="users" style="display:none;">
+        <h2 class="admin-section-title">用户管理</h2>
+        <div class="admin-search"><input type="text" id="adminUserSearch" class="input" placeholder="搜索用户名/邮箱"><button type="button" class="btn btn-secondary btn-sm" id="adminUserSearchBtn">搜索</button></div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>加密</th><th>解锁</th><th>体积</th><th>注册时间</th></tr></thead><tbody id="adminUsersBody"></tbody></table></div>
+        <p class="admin-pager" id="adminUsersPager"></p>
+      </div>
+      <div class="admin-panel" id="adminPanelUsage" data-admin-panel="usage" style="display:none;">
+        <h2 class="admin-section-title">使用记录</h2>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>用户</th><th>类型</th><th>IP</th><th>位置</th></tr></thead><tbody id="adminUsageBody"></tbody></table></div>
+        <p class="admin-pager" id="adminUsagePager">暂无数据</p>
+      </div>
+      <div class="admin-panel" id="adminPanelMonitor" data-admin-panel="monitor" style="display:none;">
+        <h2 class="admin-section-title">实时监控</h2>
+        <p class="admin-section-desc">近 1 小时 / 24 小时指标与最新访问、使用流水（每 5 秒自动刷新）</p>
+        <div class="admin-stats-cards" id="adminMonitorCards">
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorUsage1h">0</span><span class="admin-stat-label">近 1h 使用次数</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorUsage24h">0</span><span class="admin-stat-label">近 24h 使用次数</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorVisits1h">0</span><span class="admin-stat-label">近 1h 访问量</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorVisits24h">0</span><span class="admin-stat-label">近 24h 访问量</span></div>
+        </div>
+        <div class="admin-realtime-grid">
+          <div class="admin-realtime-block">
+            <h3 class="admin-subtitle">最近访问</h3>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>IP</th><th>位置</th><th>设备</th><th>用户</th></tr></thead><tbody id="adminMonitorRecentVisitsBody"></tbody></table></div>
+          </div>
+          <div class="admin-realtime-block">
+            <h3 class="admin-subtitle">最近使用</h3>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>用户</th><th>类型</th><th>IP</th><th>位置</th></tr></thead><tbody id="adminMonitorRecentUsageBody"></tbody></table></div>
+          </div>
+        </div>
+        <p class="admin-monitor-tip">每 5 秒自动刷新</p>
+      </div>
+      <div class="admin-panel" id="adminPanelPayments" data-admin-panel="payments" style="display:none;">
+        <h2 class="admin-section-title">支付记录</h2>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>用户</th><th>类型</th><th>数量</th><th>金额</th><th>状态</th><th>时间</th></tr></thead><tbody id="adminPaymentsBody"></tbody></table></div>
+        <p class="admin-pager" id="adminPaymentsPager"></p>
+      </div>
+      <div class="admin-panel" id="adminPanelPaymentTest" data-admin-panel="payment-test" style="display:none;">
+        <h2 class="admin-section-title">支付测试</h2>
+        <p class="admin-section-desc">为当前管理员账号增加加密/解锁/体积优化各 10 次（仅测试用）。</p>
+        <button type="button" class="btn btn-primary" id="adminPaymentTestBtn">执行测试到账</button>
+        <p class="admin-payment-test-result" id="adminPaymentTestResult"></p>
+      </div>
+      <div class="admin-panel" id="adminPanelCost" data-admin-panel="cost" style="display:none;">
+        <h2 class="admin-section-title">成本监控</h2>
+        <div class="admin-stats-cards">
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminCostRevenue">0</span><span class="admin-stat-label">总收入（元）</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminCostCost">0</span><span class="admin-stat-label">总成本（元）</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminCostProfit">0</span><span class="admin-stat-label">利润（元）</span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <!-- 无权限提示（#admin 但非管理员时显示） -->
+  <div id="adminForbidden" class="admin-forbidden" style="display:none;">
+    <p>需要管理员权限</p>
+    <a href="#" class="btn btn-primary">返回首页</a>
+  </div>
+
+  <!-- 加密选项弹窗 -->
+  <div class="modal-overlay" id="encryptModal" aria-hidden="true">
+    <div class="modal encrypt-modal">
+      <h3 class="modal-title">加密选项</h3>
+      <p class="modal-desc">勾选表示「禁止」该项。若勾选「打开需要密码」，请在下方设置密码。</p>
+
+      <div class="modal-section">
+        <span class="modal-section-label">限制权限（勾选即禁止）</span>
+        <div class="modal-permissions" id="encryptPermissions">
+          <label class="checkbox-label"><input type="checkbox" id="encRequirePassword"> 打开需要密码</label>
+          <label class="checkbox-label"><input type="checkbox" id="encPermModify" checked> 禁止编辑内容</label>
+          <label class="checkbox-label"><input type="checkbox" id="encPermCopy" checked> 禁止复制</label>
+          <label class="checkbox-label"><input type="checkbox" id="encPermPrint"> 禁止打印</label>
+          <label class="checkbox-label"><input type="checkbox" id="encPermAnnotate" checked> 禁止添加/修改注释</label>
+          <label class="checkbox-label"><input type="checkbox" id="encPermFillingForms"> 禁止填写表单</label>
+          <label class="checkbox-label"><input type="checkbox" id="encPermContentAccess"> 禁止提取内容（如无障碍复制）</label>
+          <label class="checkbox-label"><input type="checkbox" id="encPermAssembly" checked> 禁止组装文档（插/删页、书签等）</label>
+        </div>
+        <div class="modal-password modal-password-bottom" id="encryptPasswordWrap">
+          <label class="modal-label" for="encryptPassword">设置密码</label>
+          <input type="password" id="encryptPassword" class="input" placeholder="设置密码" autocomplete="off">
+        </div>
+      </div>
+
+      <p class="modal-hint modal-hint-error" id="encryptModalHint" aria-hidden="true"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="encryptModalCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="encryptModalConfirm">确认加密</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 体积优化弹窗：结构与加密弹窗一致 -->
+  <div class="modal-overlay" id="compressModal" aria-hidden="true">
+    <div class="modal compress-modal">
+      <h3 class="modal-title">体积优化</h3>
+      <p class="modal-desc">选择压缩模式与图片质量，点击「开始体积优化」后进行处理，成功后可下载。</p>
+      <div class="modal-section">
+        <span class="modal-section-label">减少文件大小</span>
+        <div class="modal-option-row">
+          <label class="modal-label" for="compressMode">压缩模式</label>
+          <select id="compressMode" class="input input-select">
+            <option value="raster" selected>图片重采样（显著缩小，推荐）</option>
+            <option value="standard">仅优化结构（几乎不减小体积）</option>
+          </select>
+        </div>
+        <div class="modal-option-row modal-option-row-raster" id="compressRasterQualityRow">
+          <label class="modal-label" for="compressRasterQuality">图片质量 <span class="modal-desc-inline">（默认 0.5 推荐：显著减小体积）</span></label>
+          <div class="modal-option-field-range">
+            <input type="range" id="compressRasterQuality" class="input-range" min="0.5" max="0.95" step="0.05" value="0.5" aria-describedby="compressRasterQualityValue">
+            <span class="modal-option-value" id="compressRasterQualityValue" aria-live="polite">0.5</span>
+          </div>
+        </div>
+        <div class="modal-option-row">
+          <label class="modal-label" for="compressCompatibility">Acrobat 版本兼容性</label>
+          <select id="compressCompatibility" class="input input-select">
+            <option value="1.4">Acrobat 5.0 (PDF 1.4)</option>
+            <option value="1.5">Acrobat 6.0 (PDF 1.5)</option>
+            <option value="1.7" selected>Acrobat 10.0 及更高 (PDF 1.7)</option>
+          </select>
+        </div>
+        <p class="modal-desc modal-desc-tip">
+          <span aria-hidden="true">💡</span> 默认参数（分辨率 2×、质量 0.5）显著减小体积；左滑更小更糊，右滑更清晰更大。
+        </p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="compressModalCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="compressModalConfirm">开始体积优化</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 解密选项弹窗（需打开密码时显示，含暴力破解提示） -->
+  <div class="modal-overlay" id="decryptModal" aria-hidden="true">
+    <div class="modal decrypt-modal">
+      <h3 class="modal-title">解密（需打开密码）</h3>
+      <p class="modal-desc">将尝试<strong>暴力破解</strong>打开密码（常见密码、1～4 位数字等）。</p>
+      <p class="modal-desc modal-desc-warn">破解可能<strong>耗时较长</strong>，且<strong>有一定概率无法破解</strong>；若密码较复杂，建议通过其他方式获取密码后再解密。</p>
+
+      <div class="modal-section">
+        <button type="button" class="btn btn-primary btn-block" id="decryptModalCrack">开始暴力破解</button>
+      </div>
+
+      <p class="modal-hint modal-hint-error" id="decryptModalHint" aria-hidden="true"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="decryptModalCancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 解密/破解进度条弹出层（只显示进度条与百分比） -->
+  <div class="loading-overlay loading-overlay-progress" id="decryptProgressOverlay" aria-hidden="true">
+    <div class="progress-card progress-card-decrypt">
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" id="decryptProgressBar" style="width: 0%"></div>
+      </div>
+      <p class="progress-percent" id="decryptProgressPercent">0%</p>
+    </div>
+  </div>
+
+  <!-- 加密进度条弹出层 -->
+  <div class="loading-overlay loading-overlay-progress" id="encryptProgressOverlay" aria-hidden="true">
+    <div class="progress-card">
+      <p class="loading-text" id="encryptProgressText">加密中…</p>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" id="encryptProgressBar" style="width: 0%"></div>
+      </div>
+      <p class="progress-percent" id="encryptProgressPercent">0%</p>
+    </div>
+  </div>
+
+  <!-- Loading 弹出层（解密/压缩等） -->
+  <div class="loading-overlay" id="loadingOverlay" aria-hidden="true">
+    <div class="loading-spinner"></div>
+    <p class="loading-text" id="loadingText">处理中…</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib-with-encrypt@1.2.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="js/app.js?v=3"></script>
+</body>
+</html>
