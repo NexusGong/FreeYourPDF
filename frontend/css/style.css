@@ -934,9 +934,14 @@ body {
 }
 .pay-order-title { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: var(--space-sm); }
 .pay-qr-box {
-  min-height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center;
   background: var(--bg); border-radius: var(--radius-sm); padding: var(--space-md); margin-bottom: var(--space-md);
 }
+.pay-qr-img {
+  max-width: 240px; width: 100%; min-height: 180px; height: auto; border-radius: var(--radius-sm); margin-bottom: var(--space-sm);
+  display: none; object-fit: contain; background: #fff;
+}
+.pay-qr-img.is-visible { display: block !important; }
 .pay-qr-tip { font-size: 0.9rem; color: var(--text-muted); margin-bottom: var(--space-xs); }
 .pay-qr-account { margin: 0; font-size: 0.9rem; color: var(--text); }
 .pay-order-row { margin: 0 0 var(--space-xs); font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; gap: var(--space-sm); }
@@ -946,8 +951,32 @@ body {
 .pay-copy-btn:hover { background: var(--primary); color: #fff; }
 .pay-order-amount { color: var(--primary); font-weight: 600; }
 .pay-order-remark { font-size: 0.8rem; color: var(--text-muted); margin: var(--space-sm) 0 var(--space-md); }
+.pay-order-remark-warn { color: var(--text); background: rgba(220, 120, 60, 0.12); border: 1px solid rgba(220, 120, 60, 0.4); border-radius: var(--radius-sm); padding: var(--space-sm) var(--space-md); font-size: 0.85rem; }
+.pay-order-remark-warn strong { color: #c95a2e; }
 .pay-paid-btn { width: 100%; padding: 0.85rem; font-weight: 600; font-size: 1rem; }
 .pay-modal-footer { margin-top: var(--space-md); }
+.pay-alert-modal { max-width: 400px; }
+.pay-alert-message { margin: 0 0 var(--space-lg); color: var(--text); line-height: 1.6; white-space: pre-wrap; }
+/* 支付确认失败弹窗必须叠在充值弹窗之上 */
+#paymentConfirmAlertModal.is-visible { z-index: 10001; }
+
+/* 支付确认中：正在查询（加载动画） */
+.pay-confirm-loading-overlay { z-index: 10002; }
+.pay-confirm-loading-modal { max-width: 320px; text-align: center; }
+.pay-confirm-spinner {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto var(--space-md);
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: pay-confirm-spin 0.8s linear infinite;
+}
+.pay-confirm-loading-text { margin: 0; color: var(--text-muted); font-size: 0.95rem; }
+@keyframes pay-confirm-spin {
+  to { transform: rotate(360deg); }
+}
+#paymentConfirmLoadingModal.is-visible { z-index: 10002; }
 
 /* 管理后台全页（#admin） */
 .admin-page { max-width: 1000px; margin: 0 auto; padding: var(--space-lg); min-height: 100vh; }

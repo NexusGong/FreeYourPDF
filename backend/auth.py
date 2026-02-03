@@ -226,7 +226,7 @@ def register():
 
     token = _make_token(user.id)
     import sys
-    print('[FreeYourPDF] auth: 注册成功 user_id=%s email=%s' % (user.id, user.email), flush=True)
+    print('[FreeYourPDF] 注册成功 user_id=%s email=%s' % (user.id, user.email), flush=True)
     sys.stdout.flush()
     return jsonify({
         'access_token': token,
@@ -251,7 +251,7 @@ def login():
 
     token = _make_token(user.id)
     import sys
-    print('[FreeYourPDF] auth: 登录成功 user_id=%s' % user.id, flush=True)
+    print('[FreeYourPDF] 登录成功 user_id=%s' % user.id, flush=True)
     sys.stdout.flush()
     return jsonify({
         'access_token': token,
@@ -279,7 +279,7 @@ def login_by_code():
 
     token = _make_token(user.id)
     import sys
-    print('[FreeYourPDF] auth: 验证码登录成功 user_id=%s' % user.id, flush=True)
+    print('[FreeYourPDF] 验证码登录成功 user_id=%s' % user.id, flush=True)
     sys.stdout.flush()
     return jsonify({
         'access_token': token,
@@ -312,6 +312,6 @@ def decode_token(token):
         return int(sub) if isinstance(sub, str) else sub
     except Exception as e:
         import sys
-        print('[FreeYourPDF] auth: JWT decode 异常 %s' % type(e).__name__, str(e)[:80], flush=True)
+        print('[FreeYourPDF] JWT 解码失败', flush=True)
         sys.stdout.flush()
         return None

@@ -261,7 +261,7 @@
     <div class="modal pay-modal">
       <div class="pay-modal-header">
         <h3 class="pay-modal-title">充值次数</h3>
-        <p class="pay-modal-desc">选择套餐后确认，扫码支付并填写订单号，点击「我已支付」即可到账。</p>
+        <p class="pay-modal-desc">扫码支付并填写订单号，点击「我已支付」即可到账。</p>
       </div>
       <p class="pay-plans-label">选择套餐</p>
       <div class="pay-plan-list" id="rechargeCards"></div>
@@ -272,17 +272,36 @@
       <div class="pay-order-panel" id="rechargeOrderPanel" style="display:none;">
         <div class="pay-order-title">支付码</div>
         <div class="pay-qr-box" id="rechargeQrPlaceholder">
+          <img id="rechargeQrImg" class="pay-qr-img" src="" alt="支付宝收款码">
           <span class="pay-qr-tip">请使用支付宝扫码付款</span>
           <p class="pay-qr-account" id="rechargeQrAccount"></p>
         </div>
         <div class="pay-order-title">订单信息</div>
         <p class="pay-order-row pay-order-row-id"><strong>订单号</strong><span id="rechargeModalTransactionId"></span><button type="button" class="pay-copy-btn" id="rechargeCopyOrderId" title="复制订单号">复制</button></p>
-        <p class="pay-order-row"><strong>金额</strong><span id="rechargeModalAmount" class="pay-order-amount"></span> 元</p>
-        <p class="pay-order-remark">付款时请在备注中填写上述订单号</p>
+        <p class="pay-order-remark pay-order-remark-warn"><strong>重要：</strong>付款时<strong>必须在备注中填写上述订单号</strong>，否则无法核实到账，<strong>充值将失败且不予退款</strong>。请务必复制订单号后再扫码付款。</p>
         <button type="button" class="btn btn-primary pay-paid-btn" id="rechargeModalConfirmPaid">我已支付</button>
       </div>
       <div class="pay-modal-footer">
         <button type="button" class="btn btn-secondary" id="rechargeModalClose">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 支付确认中：正在查询订单（点击「我已支付」后立即显示） -->
+  <div class="modal-overlay pay-confirm-loading-overlay" id="paymentConfirmLoadingModal" aria-hidden="true">
+    <div class="modal pay-confirm-loading-modal">
+      <div class="pay-confirm-spinner" aria-hidden="true"></div>
+      <p class="pay-confirm-loading-text">正在查询订单…</p>
+    </div>
+  </div>
+
+  <!-- 支付确认结果提示弹窗（失败时弹出） -->
+  <div class="modal-overlay" id="paymentConfirmAlertModal" aria-hidden="true">
+    <div class="modal pay-alert-modal">
+      <h3 class="modal-title" id="paymentConfirmAlertTitle">支付确认失败</h3>
+      <p class="pay-alert-message" id="paymentConfirmAlertMessage"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-primary" id="paymentConfirmAlertClose">知道了</button>
       </div>
     </div>
   </div>

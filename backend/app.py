@@ -24,6 +24,14 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 
+# 预加载支付宝验证器（仅在实际对外服务的进程中执行，避免 reloader 时重复日志）
+if os.environ.get('WERKZEUG_RUN_MAIN', 'true') != 'false':
+    try:
+        from alipay_verifier import get_alipay_verifier
+        get_alipay_verifier()
+    except Exception:
+        pass
+
 
 @app.after_request
 def _cors(resp):
@@ -68,14 +76,12 @@ def _get_current_user_id():
     """从 Authorization: Bearer <token> 解析出 user_id，无效返回 None。"""
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        _log('auth: 无 Authorization 或非 Bearer')
+        _log('认证失败：缺少或无效的 Authorization')
         return None
     token = auth_header[7:].strip()
     user_id = auth_module.decode_token(token)
     if user_id is None:
-        _log('auth: JWT 解码失败或已过期 (token 长度=%s)' % len(token))
-    else:
-        _log('auth: user_id=%s' % user_id)
+        _log('认证失败：JWT 无效或已过期')
     return user_id
 
 
@@ -122,7 +128,7 @@ def _get_location_from_ip(ip):
             'timezone': (obj.get('timezone') or '')[:50],
         }
     except Exception as e:
-        _log('get_location_from_ip %s: %s' % (ip, e))
+        _log('IP 定位异常 %s: %s' % (ip, e))
         return {}
 
 
@@ -193,7 +199,7 @@ def _record_usage(user_id, anonymous_id, usage_type, api_endpoint, response_stat
         db.session.add(rec)
         db.session.commit()
     except Exception as e:
-        _log('record_usage failed: %s' % e)
+        _log('记录使用量失败: %s' % e)
         try:
             db.session.rollback()
         except Exception:
@@ -595,6 +601,7 @@ def api_payment_confirm():
     payment = Payment.query.filter_by(transaction_id=transaction_id, user_id=user_id).first()
     if not payment:
         return jsonify({'error': '订单不存在'}), 404
+
     if payment.status == 'completed':
         return jsonify({
             'status': 'success',
@@ -610,7 +617,72 @@ def api_payment_confirm():
         })
     if payment.status != 'pending':
         return jsonify({'error': '订单状态不可确认'}), 400
-    from datetime import datetime
+
+    # 支付宝验证：若已配置 ALIPAY_COOKIE，则必须通过验证器查询到匹配账单才可完成，否则一律 503
+    if (payment.payment_method or 'alipay') == 'alipay':
+        try:
+            alipay_cookie_configured = bool(getattr(config_module, 'ALIPAY_COOKIE', '') or '')
+            from alipay_verifier import get_alipay_verifier
+            verifier = get_alipay_verifier()
+            enabled = verifier.is_enabled()
+            if alipay_cookie_configured and not enabled:
+                _log('支付确认：支付宝验证未就绪（Cookie/ctoken 不完整），请检查 .env')
+                try:
+                    from alert_email import notify_alipay_cookie_invalid
+                    notify_alipay_cookie_invalid('用户点击「我已支付」时验证器未就绪（Cookie/ctoken/billUserId 不完整或 requests 未安装）')
+                except Exception:
+                    pass
+                return jsonify({
+                    'error': '支付宝查询服务暂时不可用（如 Cookie 已过期或未正确配置），请联系管理员更新配置。',
+                    'detail': 'alipay_unavailable',
+                }), 503
+            if enabled:
+                matching, api_reachable, auth_denied = verifier.find_matching_order(
+                    float(payment.amount),
+                    payment.transaction_id or '',
+                    payment.created_at or datetime.utcnow(),
+                )
+                if auth_denied:
+                    _log('支付确认：支付宝 Cookie 已过期，请按文档更新 .env 后重启')
+                    return jsonify({
+                        'error': '支付宝登录已过期，暂无法核验到账。请管理员按「支付宝验证配置」文档重新获取 Cookie 并更新 .env 后重启服务。',
+                        'detail': 'alipay_auth_denied',
+                    }), 503
+                if not matching:
+                    # 已成功拿到账单数据但无匹配：直接 400，避免再调 is_cookie_valid() 多一次请求导致首次点击很慢
+                    if api_reachable:
+                        _log('支付确认：未查到匹配订单（金额/备注订单号不符或未付款）')
+                        return jsonify({
+                            'error': '未找到匹配的支付宝收款记录。请确认已付款且在备注中填写了订单号，或稍后再试。',
+                            'detail': 'no_matching_order',
+                        }), 400
+                    cookie_valid = verifier.is_cookie_valid()
+                    if not cookie_valid:
+                        try:
+                            from alert_email import notify_alipay_cookie_invalid
+                            notify_alipay_cookie_invalid('用户点击「我已支付」时校验失败，Cookie 无效或已过期')
+                        except Exception:
+                            pass
+                        _log('支付确认：支付宝 Cookie 已过期，请按文档更新 .env 后重启')
+                        return jsonify({
+                            'error': '支付宝查询服务暂时不可用（如 Cookie 已过期），请联系管理员更新配置。',
+                            'detail': 'alipay_unavailable',
+                        }), 503
+                    _log('支付确认：未查到匹配订单（金额/备注订单号不符或未付款）')
+                    return jsonify({
+                        'error': '未找到匹配的支付宝收款记录。请确认已付款且在备注中填写了订单号，或稍后再试。',
+                        'detail': 'no_matching_order',
+                    }), 400
+                _log('支付确认：匹配成功，订单 %s 已到账' % transaction_id)
+            else:
+                pass  # 未配置 Cookie，直接到账
+        except Exception as e:
+            _log('支付确认：验证异常 - %s' % e)
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': '支付验证异常，请稍后再试。', 'detail': str(e)}), 500
+
+    _log('支付确认：已完成到账，订单 %s' % transaction_id)
     payment.status = 'completed'
     payment.completed_at = datetime.utcnow()
     _add_quota_after_payment(user_id, payment.pack_type, payment.quantity)
@@ -667,17 +739,16 @@ def api_payment_orders():
 @app.route('/api/quota', methods=['GET'])
 def api_quota_get():
     user_id, anonymous_id = _quota_identity()
-    _log('GET /api/quota: user_id=%s anonymous_id=%s' % (user_id, (anonymous_id[:8] + '...' if anonymous_id and len(anonymous_id) > 8 else anonymous_id)))
     if user_id is not None:
         quota = Quota.query.filter_by(user_id=user_id).first()
         if not quota:
-            _log('GET /api/quota: 用户配额不存在 user_id=%s' % user_id)
+            _log('配额：用户 %s 配额不存在' % user_id)
             return jsonify({'error': '配额不存在'}), 404
         return jsonify(_quota_dict(quota))
     if anonymous_id is not None:
         anon = _get_or_create_anonymous_quota(anonymous_id)
         return jsonify(_anon_quota_dict(anon))
-    _log('GET /api/quota: 401 无登录凭证且无 X-Anonymous-Id')
+    _log('配额：未提供登录或匿名凭证')
     return jsonify({'error': '请提供登录凭证或 X-Anonymous-Id'}), 401
 
 
@@ -1228,11 +1299,27 @@ def api_crack_and_unlock():
     return jsonify({'error': '未能破解密码'}), 400
 
 
-# 启动时确认关键路由已注册（便于排查 404）
-with app.app_context():
-    _rules = [r.rule for r in app.url_map.iter_rules() if r.rule.startswith('/api/')]
-    _key = [x for x in _rules if 'payment' in x or 'user' in x]
-    print('[FreeYourPDF] API routes (payment/user):', _key, flush=True)
+# 启动时确认关键路由已注册（仅在实际对外服务的进程中打印，避免 reloader 双进程重复）
+if os.environ.get('WERKZEUG_RUN_MAIN', 'true') != 'false':
+    with app.app_context():
+        _rules = [r.rule for r in app.url_map.iter_rules() if r.rule.startswith('/api/')]
+        _key = [x for x in _rules if 'payment' in x or 'user' in x]
+        print('[FreeYourPDF] 服务就绪，API 已加载（支付/用户等 %s 个路由）' % len(_key), flush=True)
+
+# 收款码静态图（白名单，仅允许以下文件名）
+PAYMENT_QR_FILENAMES = {'alipay-10-0.99.png', 'alipay-60-4.99.png', 'alipay-110-9.99.png'}
+
+@app.route('/api/static/payment/<filename>', methods=['GET'])
+def api_static_payment(filename):
+    """提供充值收款码图片，供前端显示。"""
+    if filename not in PAYMENT_QR_FILENAMES:
+        return jsonify({'error': 'not found'}), 404
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'payment')
+    path = os.path.join(static_dir, filename)
+    if not os.path.isfile(path):
+        return jsonify({'error': 'not found'}), 404
+    return send_file(path, mimetype='image/png', max_age=86400)
+
 
 @app.route('/api/health', methods=['GET'])
 def api_health():
@@ -1241,4 +1328,5 @@ def api_health():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # use_reloader=True：修改后端代码后自动重启
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=True)

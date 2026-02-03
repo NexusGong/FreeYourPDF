@@ -21,8 +21,9 @@ PDF 加密 / 解密 / 解除权限限制的 Web 小工具。前后端分离：�
 ./start_backend.sh
 ```
 
-后端 API：http://localhost:5001  
-（脚本会进入 `backend/` 并激活 conda 环境 `freeyourpdf`；无 conda 时可在 `backend/` 下执行 `pip install -r requirements.txt && python app.py`）
+- 后端 API：http://localhost:5001  
+- 脚本会进入 `backend/` 并激活 conda 环境 `freeyourpdf`；无 conda 时可在 `backend/` 下执行 `pip install -r requirements.txt && python app.py`
+- **开发**：后端已开启热重载，修改 `backend/` 下 Python 代码并保存后会自动重启，无需手动重启
 
 **2. 启动前端**（终端二，项目根目录）
 
@@ -30,7 +31,8 @@ PDF 加密 / 解密 / 解除权限限制的 Web 小工具。前后端分离：�
 ./start_frontend.sh
 ```
 
-前端：http://localhost:8080 → 在浏览器打开即可使用。
+- 前端：http://localhost:8080 → 在浏览器打开即可使用
+- **开发**：若本机已安装 Node，脚本会使用 `live-server`，修改前端 HTML/CSS/JS 并保存后浏览器会自动刷新；无 Node 时使用 Python 静态服务，需手动刷新
 
 **仅前端**：不启后端也可用，检测与解锁会走前端逻辑，部分「仅权限加密」的 PDF 可能被误判；登录、配额、充值需后端。
 

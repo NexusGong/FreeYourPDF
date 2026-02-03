@@ -67,3 +67,14 @@ PAYMENT_PACKS = [
 ]
 # 支付宝展示名称（支付说明用）
 ALIPAY_ACCOUNT_NAME = os.environ.get('ALIPAY_ACCOUNT_NAME', '支付宝收款')
+
+# 支付宝自动验证（用户点击「我已支付」时查询支付宝账单匹配到账）
+# 不配置则保持原逻辑：点击即到账；配置后需在支付宝账单中匹配到对应金额+备注订单号才到账
+ALIPAY_COOKIE = os.environ.get('ALIPAY_COOKIE', '').strip()
+ALIPAY_CTOKEN = os.environ.get('ALIPAY_CTOKEN', '').strip()
+ALIPAY_BILL_USER_ID = os.environ.get('ALIPAY_BILL_USER_ID', '').strip()
+
+# 支付宝 Cookie 过期告警邮件（发到指定邮箱，不配置则不发）
+ALIPAY_ALERT_EMAIL = os.environ.get('ALIPAY_ALERT_EMAIL', '').strip()
+# 同一告警限流时间（小时），此时间内相同告警只发一封
+ALERT_THROTTLE_HOURS = float(os.environ.get('ALERT_THROTTLE_HOURS', '24'))

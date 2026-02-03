@@ -19,4 +19,9 @@ if [ -n "$LAN_IP" ]; then
 fi
 echo "请确保后端已启动（如 ./start_backend.sh）"
 echo "按 Ctrl+C 停止"
-python3 -m http.server "$PORT"
+# 若已安装 Node，使用 live-server 实现修改前端文件后自动刷新浏览器
+if command -v npx &>/dev/null; then
+  npx --yes live-server --port=$PORT --no-browser --ignore="node_modules"
+else
+  python3 -m http.server "$PORT"
+fi

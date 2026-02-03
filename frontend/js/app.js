@@ -243,15 +243,23 @@
 
   async function confirmPayment() {
     if (!currentOrderTransactionId) return;
-    var res = await fetchWithAuth(API_BASE + '/api/payment/confirm', { method: 'POST', body: { transaction_id: currentOrderTransactionId } });
-    var json = await res.json().catch(function () { return {}; });
-    if (res.ok && json.status === 'success') {
-      currentOrderTransactionId = null;
-      document.getElementById('rechargeOrder').style.display = 'none';
-      showGlobalHint('支付确认成功，次数已到账。');
-      await loadQuota();
-    } else {
-      showGlobalHint(json.detail || json.error || '确认失败', true);
+    showPaymentConfirmLoading();
+    try {
+      var res = await fetchWithAuth(API_BASE + '/api/payment/confirm', { method: 'POST', body: { transaction_id: currentOrderTransactionId } });
+      var json = await res.json().catch(function () { return {}; });
+      if (res.ok && json.status === 'success') {
+        currentOrderTransactionId = null;
+        document.getElementById('rechargeOrder').style.display = 'none';
+        showGlobalHint('支付确认成功，次数已到账。');
+        await loadQuota();
+      } else {
+        var errMsg = json.error || json.detail || '确认失败，请稍后再试。';
+        var alertTitle = (json.detail === 'no_matching_order') ? '未查询到订单' : (json.detail === 'alipay_auth_denied' ? 'Cookie 已过期' : '支付确认失败');
+        showGlobalHint(errMsg, true);
+        showPaymentConfirmAlert(errMsg, alertTitle);
+      }
+    } finally {
+      closePaymentConfirmLoading();
     }
   }
 
@@ -1819,6 +1827,8 @@
     modal.classList.add('is-visible');
     document.getElementById('rechargeOrderPanel').style.display = 'none';
     document.getElementById('rechargeConfirmWrap').style.display = 'none';
+    var qrImg = document.getElementById('rechargeQrImg');
+    if (qrImg) { qrImg.src = ''; qrImg.classList.remove('is-visible'); }
     var cardsEl = document.getElementById('rechargeCards');
     if (cardsEl) cardsEl.style.display = '';
     rechargeSelectedPackIndex = null;
@@ -1878,33 +1888,76 @@
     if (rechargeSelectedPackIndex == null) return;
     await createPaymentOrderFromModal(rechargeSelectedPackIndex);
   }
+  var RECHARGE_QR_IMAGES = ['alipay-10-0.99.png', 'alipay-60-4.99.png', 'alipay-110-9.99.png'];
   async function createPaymentOrderFromModal(packIndex) {
     var res = await fetchWithAuth(API_BASE + '/api/payment/create', { method: 'POST', body: { pack_index: packIndex } });
     if (!res.ok) { var j = await res.json().catch(function () { return {}; }); showGlobalHint(j.error || '创建订单失败', true); return; }
     var json = await res.json();
     currentOrderTransactionId = json.transaction_id;
     document.getElementById('rechargeModalTransactionId').textContent = json.transaction_id;
-    document.getElementById('rechargeModalAmount').textContent = json.amount;
     var accountName = (json.payment_info && json.payment_info.account_name) ? json.payment_info.account_name : '支付宝收款';
     document.getElementById('rechargeQrAccount').textContent = accountName + ' · 金额 ' + json.amount + ' 元';
+    var qrImg = document.getElementById('rechargeQrImg');
+    var baseUrl = (typeof API_BASE === 'string' && API_BASE) ? API_BASE.replace(/\/$/, '') : (window.location.protocol + '//' + window.location.hostname + ':5001');
+    if (qrImg && RECHARGE_QR_IMAGES[packIndex]) {
+      qrImg.src = baseUrl + '/api/static/payment/' + encodeURIComponent(RECHARGE_QR_IMAGES[packIndex]);
+      qrImg.alt = '支付宝收款码 · ¥' + json.amount;
+      qrImg.classList.add('is-visible');
+    } else if (qrImg) {
+      qrImg.src = '';
+      qrImg.classList.remove('is-visible');
+    }
     document.getElementById('rechargeCards').style.display = 'none';
     document.getElementById('rechargeConfirmWrap').style.display = 'none';
     document.getElementById('rechargeOrderPanel').style.display = 'block';
   }
+  function showPaymentConfirmLoading() {
+    var modal = document.getElementById('paymentConfirmLoadingModal');
+    if (modal) { modal.setAttribute('aria-hidden', 'false'); modal.classList.add('is-visible'); }
+  }
+  function closePaymentConfirmLoading() {
+    var modal = document.getElementById('paymentConfirmLoadingModal');
+    if (modal) { modal.setAttribute('aria-hidden', 'true'); modal.classList.remove('is-visible'); }
+  }
+  function showPaymentConfirmAlert(message, title) {
+    var modal = document.getElementById('paymentConfirmAlertModal');
+    var titleEl = document.getElementById('paymentConfirmAlertTitle');
+    var msgEl = document.getElementById('paymentConfirmAlertMessage');
+    if (!modal || !msgEl) return;
+    if (titleEl) titleEl.textContent = title != null ? title : '支付确认失败';
+    msgEl.textContent = message || '确认失败，请稍后再试。';
+    modal.setAttribute('aria-hidden', 'false');
+    modal.classList.add('is-visible');
+  }
+  function closePaymentConfirmAlert() {
+    var modal = document.getElementById('paymentConfirmAlertModal');
+    if (modal) { modal.setAttribute('aria-hidden', 'true'); modal.classList.remove('is-visible'); }
+  }
   async function confirmPaymentFromModal() {
-    if (!currentOrderTransactionId) return;
-    var res = await fetchWithAuth(API_BASE + '/api/payment/confirm', { method: 'POST', body: { transaction_id: currentOrderTransactionId } });
-    var json = await res.json().catch(function () { return {}; });
-    if (res.ok && json.status === 'success') {
-      currentOrderTransactionId = null;
-      document.getElementById('rechargeOrderPanel').style.display = 'none';
-      showGlobalHint('支付确认成功，次数已到账。');
-      closeRechargeModal();
-      await loadQuota();
-      updateUsageUI();
-      await loadProfileForModal();
-    } else {
-      showGlobalHint(json.detail || json.error || '确认失败', true);
+    if (!currentOrderTransactionId) {
+      showPaymentConfirmAlert('请先完成下单并获取订单号后再点击「我已支付」。', '缺少订单号');
+      return;
+    }
+    showPaymentConfirmLoading();
+    try {
+      var res = await fetchWithAuth(API_BASE + '/api/payment/confirm', { method: 'POST', body: { transaction_id: currentOrderTransactionId } });
+      var json = await res.json().catch(function () { return {}; });
+      if (res.ok && json.status === 'success') {
+        currentOrderTransactionId = null;
+        document.getElementById('rechargeOrderPanel').style.display = 'none';
+        showGlobalHint('支付确认成功，次数已到账。');
+        closeRechargeModal();
+        await loadQuota();
+        updateUsageUI();
+        await loadProfileForModal();
+      } else {
+        var errMsg = json.error || json.detail || '确认失败，请稍后再试。';
+        var alertTitle = (json.detail === 'no_matching_order') ? '未查询到订单' : (json.detail === 'alipay_auth_denied' ? 'Cookie 已过期' : '支付确认失败');
+        showGlobalHint(errMsg, true);
+        showPaymentConfirmAlert(errMsg, alertTitle);
+      }
+    } finally {
+      closePaymentConfirmLoading();
     }
   }
   async function loadAdminUsers() {
@@ -1984,6 +2037,10 @@
   });
   var rechargeModalEl = document.getElementById('rechargeModal');
   if (rechargeModalEl) rechargeModalEl.addEventListener('click', function (e) { if (e.target === rechargeModalEl) closeRechargeModal(); });
+  var paymentConfirmAlertClose = document.getElementById('paymentConfirmAlertClose');
+  if (paymentConfirmAlertClose) paymentConfirmAlertClose.addEventListener('click', closePaymentConfirmAlert);
+  var paymentConfirmAlertModal = document.getElementById('paymentConfirmAlertModal');
+  if (paymentConfirmAlertModal) paymentConfirmAlertModal.addEventListener('click', function (e) { if (e.target === paymentConfirmAlertModal) closePaymentConfirmAlert(); });
 
   var profileModalEl = document.getElementById('profileModal');
   var profileModalCancel = document.getElementById('profileModalCancel');
