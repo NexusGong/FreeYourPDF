@@ -1627,6 +1627,10 @@ def api_crack_and_unlock():
     return jsonify({'error': '未能破解密码'}), 400
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, '..', 'frontend'))
+
+
 # 启动时确认关键路由已注册（仅在实际对外服务的进程中打印，避免 reloader 双进程重复）
 if os.environ.get('WERKZEUG_RUN_MAIN', 'true') != 'false':
     with app.app_context():
@@ -1637,12 +1641,13 @@ if os.environ.get('WERKZEUG_RUN_MAIN', 'true') != 'false':
 # 收款码静态图（白名单，仅允许以下文件名）
 PAYMENT_QR_FILENAMES = {'alipay-10-0.99.png', 'alipay-60-4.99.png', 'alipay-110-9.99.png'}
 
+
 @app.route('/api/static/payment/<filename>', methods=['GET'])
 def api_static_payment(filename):
     """提供充值收款码图片，供前端显示。"""
     if filename not in PAYMENT_QR_FILENAMES:
         return jsonify({'error': 'not found'}), 404
-    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'payment')
+    static_dir = os.path.join(BASE_DIR, 'static', 'payment')
     path = os.path.join(static_dir, filename)
     if not os.path.isfile(path):
         return jsonify({'error': 'not found'}), 404
@@ -1655,6 +1660,52 @@ def api_health():
     return jsonify({'status': 'ok', 'service': 'freeyourpdf'})
 
 
+@app.route('/', methods=['GET'])
+def root_index():
+    """根路径：返回前端首页或简单 JSON，避免 404。"""
+    index_path = os.path.join(FRONTEND_DIR, 'index.html')
+    if os.path.isfile(index_path):
+        # 单页入口 HTML（与 2Vision main_prod 类似，将前端静态文件托管到同一服务）
+        return send_from_directory(FRONTEND_DIR, 'index.html')
+    # 如果前端目录不存在，返回一个友好的 JSON 提示
+    return jsonify({
+        'status': 'ok',
+        'service': 'freeyourpdf-backend',
+        'message': '前端静态文件未找到，请检查部署或通过 /api/* 调用接口。'
+    })
+
+
+@app.route('/admin', methods=['GET'])
+def admin_index():
+    """管理后台入口页面（如存在）。"""
+    admin_dir = os.path.join(FRONTEND_DIR, 'admin')
+    admin_index_path = os.path.join(admin_dir, 'index.html')
+    if os.path.isfile(admin_index_path):
+        return send_from_directory(admin_dir, 'index.html')
+    return jsonify({'error': 'admin frontend not found'}), 404
+
+
+@app.route('/assets/<path:filename>', methods=['GET'])
+def frontend_assets(filename):
+    """前端静态资源：图片、字体等。"""
+    assets_dir = os.path.join(FRONTEND_DIR, 'assets')
+    return send_from_directory(assets_dir, filename)
+
+
+@app.route('/css/<path:filename>', methods=['GET'])
+def frontend_css(filename):
+    """前端样式文件。"""
+    css_dir = os.path.join(FRONTEND_DIR, 'css')
+    return send_from_directory(css_dir, filename)
+
+
+@app.route('/js/<path:filename>', methods=['GET'])
+def frontend_js(filename):
+    """前端脚本文件。"""
+    js_dir = os.path.join(FRONTEND_DIR, 'js')
+    return send_from_directory(js_dir, filename)
+
+
 @app.route('/.well-known/appspecific/com.chrome.devtools.json', methods=['GET'])
 def api_chrome_devtools_probe():
     """
@@ -1662,6 +1713,7 @@ def api_chrome_devtools_probe():
     这里返回一个空 JSON，避免无意义的 404 噪音。
     """
     return jsonify({}), 200
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
