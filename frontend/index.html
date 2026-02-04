@@ -9,8 +9,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>FreeYourPDF - PDF 加密 / 解锁 / 体积优化</title>
   <link rel="stylesheet" href="css/style.css?v=3">
-  <!-- 前后端分开启动时，后端 API 地址（默认 5001，避免 macOS 上 5000 被 AirPlay 占用） -->
-  <script>window.FREEYOURPDF_API_BASE = 'http://localhost:5001';</script>
+  <!-- 本地开发走 http://localhost:5001，线上部署走同源（空字符串表示与当前域名同源） -->
+  <script>
+    window.FREEYOURPDF_API_BASE =
+      (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+        ? 'http://localhost:5001'
+        : '';
+  </script>
 </head>
 <body>
   <!-- 主站内容，非 #admin 时显示 -->

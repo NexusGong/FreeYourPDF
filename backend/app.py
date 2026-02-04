@@ -7,7 +7,7 @@ import io
 import os
 import sys
 from contextlib import redirect_stderr, redirect_stdout
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from pypdf import PdfReader, PdfWriter
 
 try:
