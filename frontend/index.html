@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0f0f12">
+  <link rel="icon" href="assets/logo-freeyourpdf.png">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>FreeYourPDF - PDF 加密 / 解锁 / 体积优化</title>
@@ -16,7 +17,13 @@
   <div class="page" id="mainPage">
     <header class="header">
       <div class="header-top">
-        <h1 class="logo">FreeYourPDF</h1>
+        <div class="logo-combo">
+          <img src="assets/logo-freeyourpdf.png" alt="FreeYourPDF 标志" class="logo-img">
+          <div class="logo-text-wrap">
+            <h1 class="logo"><span class="logo-text">FreeYourPDF</span></h1>
+            <p class="tagline">PDF 加密 · 解锁 · 体积优化</p>
+          </div>
+        </div>
         <div class="auth-area" id="authArea">
           <div class="auth-user-wrap" id="authUserWrap" aria-hidden="true">
             <button type="button" class="auth-user-trigger" id="authUserTrigger" aria-expanded="false" aria-haspopup="true">
@@ -35,37 +42,30 @@
               <button type="button" class="auth-dropdown-item auth-dropdown-item-danger" id="dropdownLogout" role="menuitem">退出登录</button>
             </div>
           </div>
-          <button type="button" class="btn btn-primary btn-sm" id="btnAuth">登录/注册</button>
-        </div>
-      </div>
-      <p class="tagline">PDF 加密 · 解锁 · 体积优化</p>
-      <div class="usage-row" id="usageRow">
-        <div class="usage usage-encrypt">
-          <span class="usage-label usage-label-long">加密</span>
-          <span class="usage-label usage-label-short" aria-hidden="true">加密</span>
-          <span class="usage-value" id="usageValueEncrypt">5</span>
-          <span class="usage-total" id="usageTotalEncrypt">/ 5</span>
-        </div>
-        <div class="usage usage-unlock">
-          <span class="usage-label usage-label-long">解锁</span>
-          <span class="usage-label usage-label-short" aria-hidden="true">解锁</span>
-          <span class="usage-value" id="usageValueUnlock">5</span>
-          <span class="usage-total" id="usageTotalUnlock">/ 5</span>
-        </div>
-        <div class="usage usage-compress">
-          <span class="usage-label usage-label-long">体积优化</span>
-          <span class="usage-label usage-label-short" aria-hidden="true">体积</span>
-          <span class="usage-value" id="usageValueCompress">5</span>
-          <span class="usage-total" id="usageTotalCompress">/ 5</span>
+          <button type="button" class="btn btn-primary btn-circle" id="btnAuth">
+            登录
+          </button>
         </div>
       </div>
     </header>
 
     <main class="main">
       <nav class="tabs" id="mainTabs" role="tablist">
-        <button type="button" class="tab is-active" id="tabEncrypt" role="tab" aria-selected="true" data-tab="encrypt">加密</button>
-        <button type="button" class="tab" id="tabUnlock" role="tab" aria-selected="false" data-tab="unlock">解锁</button>
-        <button type="button" class="tab" id="tabCompress" role="tab" aria-selected="false" data-tab="compress">体积优化</button>
+        <button type="button" class="tab is-active" id="tabEncrypt" role="tab" aria-selected="true" data-tab="encrypt">
+          加密
+          <span class="usage-value" id="usageValueEncrypt">5</span>
+          <span class="usage-total" id="usageTotalEncrypt">/ 5</span>
+        </button>
+        <button type="button" class="tab" id="tabUnlock" role="tab" aria-selected="false" data-tab="unlock">
+          解锁
+          <span class="usage-value" id="usageValueUnlock">5</span>
+          <span class="usage-total" id="usageTotalUnlock">/ 5</span>
+        </button>
+        <button type="button" class="tab" id="tabCompress" role="tab" aria-selected="false" data-tab="compress">
+          体积优化
+          <span class="usage-value" id="usageValueCompress">5</span>
+          <span class="usage-total" id="usageTotalCompress">/ 5</span>
+        </button>
       </nav>
 
       <section class="card" id="uploadCard">
@@ -423,6 +423,7 @@
         <div class="modal-password modal-password-bottom" id="encryptPasswordWrap">
           <label class="modal-label" for="encryptPassword">设置密码</label>
           <input type="password" id="encryptPassword" class="input" placeholder="设置密码" autocomplete="off">
+          <p class="modal-hint" style="margin-top:6px;font-size:0.85em;color:var(--muted, #666);">勾选「打开需要密码」时，此密码用于打开 PDF；未勾选时，此密码为权限密码，在阅读器中修改安全设置时输入。建议使用英文、数字。</p>
         </div>
       </div>
 
@@ -438,33 +439,11 @@
   <div class="modal-overlay" id="compressModal" aria-hidden="true">
     <div class="modal compress-modal">
       <h3 class="modal-title">体积优化</h3>
-      <p class="modal-desc">选择压缩模式与图片质量，点击「开始体积优化」后进行处理，成功后可下载。</p>
+      <p class="modal-desc">由服务端统一进行智能压缩，点击「开始体积优化」后进行处理，成功后可下载。</p>
       <div class="modal-section">
         <span class="modal-section-label">减少文件大小</span>
-        <div class="modal-option-row">
-          <label class="modal-label" for="compressMode">压缩模式</label>
-          <select id="compressMode" class="input input-select">
-            <option value="raster" selected>图片重采样（显著缩小，推荐）</option>
-            <option value="standard">仅优化结构（几乎不减小体积）</option>
-          </select>
-        </div>
-        <div class="modal-option-row modal-option-row-raster" id="compressRasterQualityRow">
-          <label class="modal-label" for="compressRasterQuality">图片质量 <span class="modal-desc-inline">（默认 0.5 推荐：显著减小体积）</span></label>
-          <div class="modal-option-field-range">
-            <input type="range" id="compressRasterQuality" class="input-range" min="0.5" max="0.95" step="0.05" value="0.5" aria-describedby="compressRasterQualityValue">
-            <span class="modal-option-value" id="compressRasterQualityValue" aria-live="polite">0.5</span>
-          </div>
-        </div>
-        <div class="modal-option-row">
-          <label class="modal-label" for="compressCompatibility">Acrobat 版本兼容性</label>
-          <select id="compressCompatibility" class="input input-select">
-            <option value="1.4">Acrobat 5.0 (PDF 1.4)</option>
-            <option value="1.5">Acrobat 6.0 (PDF 1.5)</option>
-            <option value="1.7" selected>Acrobat 10.0 及更高 (PDF 1.7)</option>
-          </select>
-        </div>
         <p class="modal-desc modal-desc-tip">
-          <span aria-hidden="true">💡</span> 默认参数（分辨率 2×、质量 0.5）显著减小体积；左滑更小更糊，右滑更清晰更大。
+          <span aria-hidden="true">💡</span> 系统会在服务器端自动选择合适的压缩参数，在尽量保持清晰度的前提下显著减小 PDF 体积。
         </p>
       </div>
       <div class="modal-actions">
@@ -519,8 +498,6 @@
     <p class="loading-text" id="loadingText">处理中…</p>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/pdf-lib-with-encrypt@1.2.1/dist/pdf-lib.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="js/app.js?v=3"></script>
 </body>
 </html>

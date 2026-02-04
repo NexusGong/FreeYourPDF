@@ -5,8 +5,18 @@ PDF 检测与解锁后端：仅提供 API，与前端分开启动；需配置 CO
 """
 import io
 import os
+import sys
+from contextlib import redirect_stderr, redirect_stdout
 from flask import Flask, request, jsonify, send_file
 from pypdf import PdfReader, PdfWriter
+
+try:
+    import pikepdf
+except ImportError:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pikepdf>=8.0.0'], cwd=os.path.dirname(os.path.abspath(__file__)))
+    import pikepdf
 
 import uuid
 from datetime import datetime, timedelta
@@ -23,6 +33,30 @@ app.config['MAX_CONTENT_LENGTH'] = config_module.MAX_CONTENT_LENGTH
 db.init_app(app)
 with app.app_context():
     db.create_all()
+    # 为已有 usage_record 表补全缺失列（保留地理、设备等有用字段）
+    try:
+        conn = db.engine.raw_connection()
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(usage_record)")
+        existing = {row[1] for row in cur.fetchall()}
+        for col, sql_type in [
+            ('country', 'VARCHAR(100)'),
+            ('region', 'VARCHAR(100)'),
+            ('city', 'VARCHAR(100)'),
+            ('timezone', 'VARCHAR(50)'),
+            ('device_type', 'VARCHAR(20)'),
+            ('browser', 'VARCHAR(100)'),
+            ('os', 'VARCHAR(100)'),
+        ]:
+            if col not in existing:
+                cur.execute("ALTER TABLE usage_record ADD COLUMN %s %s" % (col, sql_type))
+                conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        import sys
+        print('[FreeYourPDF] usage_record 表补列:', e, flush=True)
+        sys.stdout.flush()
 
 # 预加载支付宝验证器（仅在实际对外服务的进程中执行，避免 reloader 时重复日志）
 if os.environ.get('WERKZEUG_RUN_MAIN', 'true') != 'false':
@@ -72,11 +106,33 @@ def _log(msg):
     sys.stdout.flush()
 
 
-def _get_current_user_id():
-    """从 Authorization: Bearer <token> 解析出 user_id，无效返回 None。"""
+class _suppress_pdf_warnings:
+    """临时屏蔽底层 PDF 库在 stdout/stderr 上的噪音日志，只保留我们自己的 _log 输出。"""
+
+    def __enter__(self):
+        self._null = open(os.devnull, 'w')
+        self._cm_out = redirect_stdout(self._null)
+        self._cm_err = redirect_stderr(self._null)
+        self._cm_out.__enter__()
+        self._cm_err.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self._cm_err.__exit__(exc_type, exc, tb)
+            self._cm_out.__exit__(exc_type, exc, tb)
+        finally:
+            self._null.close()
+
+
+def _get_current_user_id(silent=False):
+    """从 Authorization: Bearer <token> 解析出 user_id，无效返回 None。
+    silent=True 时不打印「认证失败」日志，适用于支持匿名访问的接口。
+    """
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        _log('认证失败：缺少或无效的 Authorization')
+        if not silent:
+            _log('认证失败：缺少或无效的 Authorization')
         return None
     token = auth_header[7:].strip()
     user_id = auth_module.decode_token(token)
@@ -229,7 +285,8 @@ def _require_admin():
 
 def _quota_identity():
     """配额接口用：有 JWT 用 user_id，否则用 anonymous_id。返回 (user_id, anonymous_id)，都无则 (None, None)。"""
-    user_id = _get_current_user_id()
+    # 匿名也合法，这里静默解析 JWT，避免终端充斥认证失败日志
+    user_id = _get_current_user_id(silent=True)
     if user_id is not None:
         return user_id, None
     aid = _get_anonymous_id()
@@ -349,7 +406,8 @@ def api_visit():
     session_id = (data.get('session_id') or '').strip() or None
     if session_id and len(session_id) > 100:
         session_id = session_id[:100]
-    user_id = _get_current_user_id()
+    # 访问记录允许匿名，这里静默解析 JWT，避免未登录时刷屏日志
+    user_id = _get_current_user_id(silent=True)
     ip = _get_client_ip()
     geo = _get_location_from_ip(ip)
     ua = request.headers.get('User-Agent') or ''
@@ -1168,12 +1226,13 @@ def _can_open(stream, password=None):
     """尝试用给定密码打开 PDF，成功返回 True。"""
     stream.seek(0)
     try:
-        reader = PdfReader(stream)
-        if not reader.is_encrypted:
-            return True
-        pwd = password if password is not None else ''
-        reader.decrypt(pwd)
-        return len(reader.pages) > 0
+        with _suppress_pdf_warnings():
+            reader = PdfReader(stream)
+            if not reader.is_encrypted:
+                return True
+            pwd = password if password is not None else ''
+            reader.decrypt(pwd)
+            return len(reader.pages) > 0
     except Exception:
         return False
 
@@ -1227,7 +1286,7 @@ def api_unlock():
     f = request.files['file']
     if not f.filename or not f.filename.lower().endswith('.pdf'):
         return jsonify({'error': '请上传 PDF 文件'}), 400
-    password = request.form.get('password') or ''
+    password = _normalize_pdf_password(request.form.get('password') or '')
     data = f.read()
     stream = io.BytesIO(data)
     try:
@@ -1251,6 +1310,275 @@ def api_unlock():
         import traceback
         traceback.print_exc()
         return jsonify({'error': '解锁失败：' + str(e)}), 400
+
+
+# PDF 权限位（Table 3.20）：与 pypdf.constants.UserAccessPermissions 一致
+_ENC_PRINT_LOW = 4
+_ENC_MODIFY = 8
+_ENC_EXTRACT = 16
+_ENC_ADD_OR_MODIFY = 32
+_ENC_FILL_FORMS = 256
+_ENC_EXTRACT_TEXT_GRAPHICS = 512
+_ENC_ASSEMBLE = 1024
+_ENC_PRINT_HIGH = 2048
+
+
+def _encrypt_permissions_flag(perms):
+    """根据前端权限对象计算 PDF P 值。前端勾选=禁止该权限，PDF 位 1=允许。
+    未传的项视为不禁止（允许）。全部禁止时返回 0，全部允许时返回 -1（pypdf 全开）。"""
+    if not perms:
+        return -1  # 全部允许
+    flag = 0
+    # 勾选=禁止 → 不设置对应位；未勾选=允许 → 设置对应位
+    if not perms.get('modifying', False):
+        flag |= _ENC_MODIFY
+    if not perms.get('copying', False):
+        flag |= _ENC_EXTRACT
+    if not perms.get('annotating', False):
+        flag |= _ENC_ADD_OR_MODIFY
+    if not perms.get('documentAssembly', False):
+        flag |= _ENC_ASSEMBLE
+    if not perms.get('fillingForms', False):
+        flag |= _ENC_FILL_FORMS
+    if not perms.get('contentAccessibility', False):
+        flag |= _ENC_EXTRACT_TEXT_GRAPHICS
+    if perms.get('printing', False) is True:
+        pass  # 禁止打印：不设置打印位
+    else:
+        flag |= _ENC_PRINT_LOW
+        flag |= _ENC_PRINT_HIGH
+    # 全部禁止时 flag=0，必须返回 0，不能返回 -1（-1 表示全部允许）
+    return flag
+
+
+def _pikepdf_permissions(perms):
+    """根据前端权限对象构造 pikepdf.Permissions。前端勾选=禁止，pikepdf True=允许。"""
+    if not perms:
+        return None  # 全部允许，不传 allow
+    return pikepdf.Permissions(
+        modify_other=not perms.get('modifying', False),
+        extract=not perms.get('copying', False),
+        modify_annotation=not perms.get('annotating', False),
+        modify_assembly=not perms.get('documentAssembly', False),
+        modify_form=not perms.get('fillingForms', False),
+        accessibility=not perms.get('contentAccessibility', False),
+        print_lowres=not perms.get('printing', False),
+        print_highres=not perms.get('printing', False),
+    )
+
+
+def _normalize_pdf_password(s):
+    """PDF 标准使用 Latin-1 编码密码。将字符串规范为仅含 Latin-1 字符，保证加密后用同一密码可打开。"""
+    if s is None:
+        return ''
+    s = str(s).strip()
+    try:
+        return s.encode('latin-1').decode('latin-1')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return ''.join(c for c in s if ord(c) < 256)
+
+
+def _compress_pdf_with_ghostscript(data, quality='/ebook'):
+    """
+    使用 Ghostscript 压缩 PDF（类似 pdfc 项目），返回压缩后的 bytes。
+    需要系统已安装 gs 命令；失败或未安装时抛异常，由调用方兜底。
+    quality 可选：/screen, /ebook, /printer, /prepress 等。
+    """
+    import subprocess
+    import tempfile
+
+    if not data:
+        raise ValueError('empty pdf data')
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        in_path = os.path.join(tmpdir, 'input.pdf')
+        out_path = os.path.join(tmpdir, 'output.pdf')
+        with open(in_path, 'wb') as f_in:
+            f_in.write(data)
+        # 参考 https://github.com/theeko74/pdfc 使用的 Ghostscript 参数
+        cmd = [
+            'gs',
+            '-sDEVICE=pdfwrite',
+            '-dCompatibilityLevel=1.4',
+            f'-dPDFSETTINGS={quality}',
+            '-dNOPAUSE',
+            '-dQUIET',
+            '-dBATCH',
+            f'-sOutputFile={out_path}',
+            in_path,
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            raise RuntimeError('ghostscript compress failed: %s' % (proc.stderr.decode('utf-8', errors='ignore') or proc.returncode))
+        with open(out_path, 'rb') as f_out:
+            out_bytes = f_out.read()
+        if not out_bytes:
+            raise RuntimeError('ghostscript produced empty output')
+        return out_bytes
+
+
+@app.route('/api/encrypt', methods=['POST'])
+def api_encrypt():
+    """加密 PDF：登录或匿名。先校验文件且未加密再扣配额，用 pypdf 加密后返回。"""
+    user_id, anonymous_id = _quota_identity()
+    if user_id is None and anonymous_id is None:
+        return jsonify({'error': '请提供登录凭证或 X-Anonymous-Id'}), 401
+    if 'file' not in request.files:
+        return jsonify({'error': '未上传文件'}), 400
+    f = request.files['file']
+    if not f.filename or not f.filename.lower().endswith('.pdf'):
+        return jsonify({'error': '请上传 PDF 文件'}), 400
+    # 先取 form 再读 file，避免部分环境下 form 未解析完整
+    user_password = (request.form.get('user_password') or '').strip()
+    owner_password = (request.form.get('owner_password') or '').strip()
+    perms_json = request.form.get('permissions')
+    data = f.read()
+    if not data:
+        return jsonify({'error': '文件为空'}), 400
+    stream = io.BytesIO(data)
+    try:
+        reader = PdfReader(stream)
+        if reader.is_encrypted:
+            return jsonify({'error': '请先解锁已加密的 PDF 再使用加密功能'}), 400
+        if len(reader.pages) == 0:
+            return jsonify({'error': 'PDF 无有效页面'}), 400
+    except Exception as e:
+        return jsonify({'error': '无法读取 PDF：' + str(e)}), 400
+    if user_id is not None:
+        ok, result = _consume_quota(user_id, 'encrypt')
+    else:
+        ok, result = _consume_anonymous_quota(anonymous_id, 'encrypt')
+    if not ok:
+        return jsonify({'error': result}), 403
+    permissions_flag = -1
+    if perms_json:
+        try:
+            import json
+            perms = json.loads(perms_json)
+            permissions_flag = _encrypt_permissions_flag(perms)
+        except Exception:
+            pass
+    try:
+        out = None
+        # 有打开密码：用 pikepdf，user=owner=打开密码；仅权限无打开密码：用 pikepdf，user=''、owner=权限密码，保证 Acrobat 中「操作权限密码」正确
+        use_pikepdf = bool(user_password) or (permissions_flag != -1)
+        if use_pikepdf:
+            stream_in = io.BytesIO(data)
+            pdf = pikepdf.Pdf.open(stream_in)
+            out = io.BytesIO()
+            allow = None
+            if perms_json:
+                try:
+                    import json as _json
+                    perms = _json.loads(perms_json)
+                    allow = _pikepdf_permissions(perms)
+                except Exception:
+                    pass
+            if user_password:
+                # 打开需要密码：user 与 owner 同密码，用该密码打开即拥有全部权限
+                enc = pikepdf.Encryption(user=user_password, owner=user_password, R=4, allow=allow)
+            else:
+                # 仅权限、无打开密码：user 为空（任何人可打开），owner 为前端传的权限密码（在阅读器中修改安全设置时输入）
+                enc = pikepdf.Encryption(user='', owner=owner_password, R=4, allow=allow)
+            pdf.save(out, encryption=enc)
+            pdf.close()
+            out.seek(0)
+        if out is None:
+            # 无权限限制且无密码：用 pypdf 做无加密或仅占位
+            stream2 = io.BytesIO(data)
+            reader = PdfReader(stream2)
+            writer = PdfWriter()
+            for page in reader.pages:
+                writer.add_page(page)
+            owner_pwd = user_password or owner_password or None
+            writer.encrypt(
+                user_password,
+                owner_pwd,
+                use_128bit=True,
+                permissions_flag=permissions_flag,
+            )
+            out = io.BytesIO()
+            writer.write(out)
+            out.seek(0)
+            pdf_bytes = out.getvalue()
+            if b'/Encrypt' not in pdf_bytes:
+                raise ValueError('加密未写入 PDF')
+        _record_usage(user_id, anonymous_id, 'encrypt', '/api/encrypt', 200)
+        base_name = (f.filename or 'output.pdf').replace('.pdf', '')
+        return send_file(
+            out,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=base_name + '_encrypted.pdf',
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': '加密失败：' + str(e)}), 400
+
+
+@app.route('/api/compress', methods=['POST'])
+def api_compress():
+    """体积优化：登录或匿名，先校验再扣 compress 配额。
+    优先使用 Ghostscript 压缩（图片重采样等），失败时退回 pypdf 结构优化。
+    """
+    user_id, anonymous_id = _quota_identity()
+    if user_id is None and anonymous_id is None:
+        return jsonify({'error': '请提供登录凭证或 X-Anonymous-Id'}), 401
+    if 'file' not in request.files:
+        return jsonify({'error': '未上传文件'}), 400
+    f = request.files['file']
+    if not f.filename or not f.filename.lower().endswith('.pdf'):
+        return jsonify({'error': '请上传 PDF 文件'}), 400
+    data = f.read()
+    if not data:
+        return jsonify({'error': '文件为空'}), 400
+    stream = io.BytesIO(data)
+    try:
+        with _suppress_pdf_warnings():
+            reader = PdfReader(stream)
+            if reader.is_encrypted:
+                return jsonify({'error': '请先解锁已加密的 PDF 再使用体积优化'}), 400
+            if len(reader.pages) == 0:
+                return jsonify({'error': 'PDF 无有效页面'}), 400
+    except Exception as e:
+        return jsonify({'error': '无法读取 PDF：' + str(e)}), 400
+    if user_id is not None:
+        ok, result = _consume_quota(user_id, 'compress')
+    else:
+        ok, result = _consume_anonymous_quota(anonymous_id, 'compress')
+    if not ok:
+        return jsonify({'error': result}), 403
+    try:
+        # 1) 尝试用 Ghostscript 进行有损压缩（默认使用 /ebook：150dpi 左右，兼顾质量与体积）
+        try:
+            compressed_bytes = _compress_pdf_with_ghostscript(data, quality='/ebook')
+        except Exception:
+            # 2) Ghostscript 不可用或失败时，退回到 pypdf 结构优化（无损或轻微压缩）
+            stream2 = io.BytesIO(data)
+            with _suppress_pdf_warnings():
+                reader = PdfReader(stream2)
+                writer = PdfWriter()
+                for page in reader.pages:
+                    writer.add_page(page)
+                writer.compress_identical_objects(remove_identicals=True, remove_orphans=True)
+                out_buf = io.BytesIO()
+                writer.write(out_buf)
+                out_buf.seek(0)
+                compressed_bytes = out_buf.getvalue()
+
+        _record_usage(user_id, anonymous_id, 'compress', '/api/compress', 200)
+        base_name = (f.filename or 'output.pdf').replace('.pdf', '')
+        return send_file(
+            io.BytesIO(compressed_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=base_name + '_compressed.pdf',
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': '体积优化失败：' + str(e)}), 400
 
 
 @app.route('/api/crack-and-unlock', methods=['POST'])
@@ -1325,6 +1653,15 @@ def api_static_payment(filename):
 def api_health():
     """健康检查，确认服务与路由正常。"""
     return jsonify({'status': 'ok', 'service': 'freeyourpdf'})
+
+
+@app.route('/.well-known/appspecific/com.chrome.devtools.json', methods=['GET'])
+def api_chrome_devtools_probe():
+    """
+    Chrome DevTools 在本地调试时会定期请求该路径，默认会打出 404 日志。
+    这里返回一个空 JSON，避免无意义的 404 噪音。
+    """
+    return jsonify({}), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))

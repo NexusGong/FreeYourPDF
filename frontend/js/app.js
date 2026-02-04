@@ -77,15 +77,6 @@
     }
   }
 
-  if (!window.PDFLib || !window.PDFLib.PDFDocument) {
-    document.body.innerHTML = '<div class="page" style="padding:2rem;text-align:center;color:#a1a1aa;">PDF 库加载失败，请检查网络或刷新页面。</div>';
-    return;
-  }
-
-  if (typeof window.pdfjsLib !== 'undefined' && window.pdfjsLib.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
-
   function isTouchDevice() {
     return 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
   }
@@ -93,8 +84,6 @@
   function getFileInputPlaceholder() {
     return isTouchDevice() ? '点击选择多个 PDF' : '点击选择或拖入多个 PDF';
   }
-
-  const PDFDocument = window.PDFLib.PDFDocument;
 
   function updateUsageUI() {
     var q = stateQuota;
@@ -382,6 +371,8 @@
       if (!res.ok) { showAuthHint(json.error || '登录失败', true); return; }
       setToken(json.access_token);
       currentUser = json.user;
+      var pwdEl = document.getElementById('loginPassword');
+      if (pwdEl) pwdEl.value = '';
       await loadQuota();
       closeAuthModal();
       updateAuthUI();
@@ -400,6 +391,8 @@
       if (!res.ok) { showAuthHint(json.error || '登录失败', true); return; }
       setToken(json.access_token);
       currentUser = json.user;
+      var pwdEl = document.getElementById('loginPassword');
+      if (pwdEl) pwdEl.value = '';
       await loadQuota();
       closeAuthModal();
       updateAuthUI();
@@ -411,12 +404,24 @@
 
   window.openAuthModal = openAuthModal;
 
-  function showGlobalHint(text, isError) {
-    const el = document.getElementById('globalHint');
+  /** 每个功能 tab 单独保存提示信息，切换 tab 时只显示当前 tab 的提示 */
+  var _currentTabForHint = 'encrypt';
+  var _hintByTab = { encrypt: '', unlock: '', compress: '' };
+  var _hintErrorByTab = { encrypt: false, unlock: false, compress: false };
+  function setGlobalHintDOM(text, isError) {
+    var el = document.getElementById('globalHint');
     if (!el) return;
-    el.textContent = text || '';
+    // 支持富文本高亮（如 <strong>），仅用于内部固定文案，安全可控
+    el.innerHTML = text || '';
     el.classList.toggle('hint-error', !!isError);
     el.classList.toggle('hint-ok', !isError && !!text);
+  }
+  function showGlobalHint(text, isError) {
+    if (_hintByTab[_currentTabForHint] !== undefined) {
+      _hintByTab[_currentTabForHint] = text || '';
+      _hintErrorByTab[_currentTabForHint] = !!isError;
+    }
+    setGlobalHintDOM(text || '', isError);
   }
 
 
@@ -455,30 +460,13 @@
   async function detectEncryption(file) {
     var api = await apiDetect(file);
     if (api) return api.encrypted;
-    var bytes = new Uint8Array(await file.arrayBuffer());
-    var hasEncrypt = new TextDecoder('utf-8', { fatal: false }).decode(bytes).indexOf('/Encrypt') !== -1;
-    if (hasEncrypt) {
-      try {
-        await PDFDocument.load(bytes, { password: '' });
-        return false;
-      } catch (e) {}
-      try {
-        await PDFDocument.load(bytes);
-        return false;
-      } catch (e2) {
-        return true;
-      }
-    }
+    // 后端不可用时，退回到简单的 /Encrypt 关键字检测（不再依赖前端 PDF 库）
     try {
-      await PDFDocument.load(bytes);
-      return false;
+      var bytes = new Uint8Array(await file.arrayBuffer());
+      var text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+      return text.indexOf('/Encrypt') !== -1;
     } catch (e) {
-      try {
-        await PDFDocument.load(bytes, { password: '' });
-        return false;
-      } catch (e2) {
-        return true;
-      }
+      return false;
     }
   }
 
@@ -492,87 +480,6 @@
     } catch (e) {
       return false;
     }
-  }
-
-  /** 尝试用指定密码打开 PDF，成功返回 true；空字符串显式传 password: '' 以支持空密码 PDF */
-  async function tryPassword(bytes, pwd) {
-    try {
-      var loadOpts = pwd === undefined ? {} : { password: pwd };
-      await PDFDocument.load(bytes, loadOpts);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /**
-   * 解锁：将 PDF 每页复制到新文档再保存，移除加密/权限（参考 PDFDeSecure）
-   * @param {Uint8Array} bytes - 原 PDF 字节
-   * @param {string} [password] - 若需密码打开则传入
-   * @returns {Promise<Uint8Array|null>} 解锁后的 PDF 字节，失败返回 null
-   */
-  async function unlockPdfToBytes(bytes, password) {
-    try {
-      var loadOpts = password === undefined ? {} : { password: password };
-      var doc = await PDFDocument.load(bytes, loadOpts);
-      var newDoc = await PDFDocument.create();
-      var indices = doc.getPageIndices();
-      if (!indices || indices.length === 0) return null;
-      var copiedPages = await newDoc.copyPages(doc, indices);
-      for (var i = 0; i < copiedPages.length; i++) newDoc.addPage(copiedPages[i]);
-      return await newDoc.save({ useObjectStreams: false });
-    } catch (e) {
-      console.error('unlockPdfToBytes failed', e);
-      return null;
-    }
-  }
-
-  /** 常见密码 + 1～4 位数字 + 日期 DDMMYYYY(2000～2030)，用于需要打开密码时暴力破解 */
-  var COMMON_PASSWORDS = [
-    '', '123456', 'password', '12345678', '1234', '12345', 'qwerty', '123456789',
-    '1234567', '111111', '000000', '123123', 'abc123', 'password1', 'admin', 'root',
-    'pdf', 'PDF', 'Pdf', 'pass', 'Pass', 'open', 'Open', 'secret', 'changeme'
-  ];
-  function pad2(n) { return n < 10 ? '0' + n : String(n); }
-  function daysInMonth(m, y) {
-    if (m === 2) return (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)) ? 29 : 28;
-    if (m === 4 || m === 6 || m === 9 || m === 11) return 30;
-    return 31;
-  }
-  function buildPasswordList() {
-    var seen = {};
-    var list = [];
-    function add(p) { if (seen[p]) return; seen[p] = true; list.push(p); }
-    COMMON_PASSWORDS.forEach(add);
-    for (var len = 1; len <= 4; len++) {
-      var max = Math.pow(10, len);
-      for (var n = 0; n < max; n++) {
-        var s = String(n);
-        while (s.length < len) s = '0' + s;
-        add(s);
-      }
-    }
-    for (var y = 2000; y <= 2030; y++) {
-      for (var m = 1; m <= 12; m++) {
-        for (var d = 1; d <= daysInMonth(m, y); d++) add(pad2(d) + pad2(m) + String(y));
-      }
-    }
-    return list;
-  }
-  var CRACK_PASSWORD_LIST = null;
-  function getCrackPasswordList() {
-    if (!CRACK_PASSWORD_LIST) CRACK_PASSWORD_LIST = buildPasswordList();
-    return CRACK_PASSWORD_LIST;
-  }
-  async function crackPdfPassword(bytes, onProgress) {
-    var list = getCrackPasswordList();
-    var total = list.length;
-    for (var i = 0; i < list.length; i++) {
-      var pwd = list[i];
-      if (onProgress) onProgress(i + 1, total, pwd === '' ? '（空密码）' : pwd);
-      if (await tryPassword(bytes, pwd)) return pwd;
-    }
-    return null;
   }
 
   const fileListEl = document.getElementById('fileList');
@@ -597,8 +504,11 @@
       unlock: '支持多选，可对需密码或有权限限制的 PDF 进行解锁（系统破解或解除限制）。',
       compress: '支持多选，可对未加密的 PDF 进行体积优化。已加密的 PDF 请先解锁后再使用本功能。'
     };
+    var strongNote = (t === 'encrypt')
+      ? ' <strong>设置打开密码时由服务端加密，保证用您设置的密码可在 Adobe、预览等阅读器中正确打开。</strong>'
+      : ' <strong>全部在您设备本地处理，文件不上传服务器，隐私与安全有保障。</strong>';
     if (titleEl) titleEl.textContent = titles[t] || titles.encrypt;
-    if (descEl) descEl.innerHTML = (intros[t] || intros.encrypt) + ' <strong>全部在您设备本地处理，文件不上传服务器，隐私与安全有保障。</strong>';
+    if (descEl) descEl.innerHTML = (intros[t] || intros.encrypt) + strongNote;
   }
 
   function getCompressCompatibility() {
@@ -607,19 +517,18 @@
   }
 
   function getCompressMode() {
-    var sel = document.getElementById('compressMode');
-    return sel ? sel.value : 'standard';
+    // 统一走后端 /api/compress，由后端负责体积优化，不再在前端进行图片重采样
+    return 'standard';
   }
 
+  // 压缩质量由后端 Ghostscript 决定，前端不再管理滑块
   function getCompressRasterQuality() {
-    var el = document.getElementById('compressRasterQuality');
-    if (!el) return 0.5;
-    var v = parseFloat(el.value, 10);
-    return isNaN(v) ? 0.5 : Math.max(0.4, Math.min(0.95, v));
+    return 0.5;
   }
 
   function setActiveTab(tab) {
     state.currentTab = tab;
+    _currentTabForHint = tab;
     var tabEncrypt = document.getElementById('tabEncrypt');
     var tabUnlock = document.getElementById('tabUnlock');
     var tabCompress = document.getElementById('tabCompress');
@@ -638,6 +547,7 @@
     updateCardByTab();
     syncCompressRasterQualityDisplay();
     renderFileList();
+    setGlobalHintDOM(_hintByTab[tab] || '', _hintErrorByTab[tab]);
     var textEl = document.getElementById('pdfInputText');
     var n = getCurrentItems().length;
     if (textEl) textEl.textContent = n > 0 ? '已选 ' + n + ' 个文件，可继续添加' : getFileInputPlaceholder();
@@ -817,6 +727,8 @@
     return {
       requirePassword: requirePwd,
       userPassword: requirePwd ? pwd : '',
+      /** 未勾选「打开需要密码」时，此密码作为「权限密码」，用于在阅读器中修改安全设置 */
+      ownerPassword: !requirePwd ? pwd : '',
       modifying: document.getElementById('encPermModify') ? document.getElementById('encPermModify').checked : true,
       copying: document.getElementById('encPermCopy') ? document.getElementById('encPermCopy').checked : true,
       printing: document.getElementById('encPermPrint') ? document.getElementById('encPermPrint').checked : false,
@@ -882,7 +794,7 @@
   }
 
   /**
-   * 解除权限限制：优先请求后端 /api/unlock（需登录，后端扣配额），失败则用前端 unlockPdfToBytes（先扣配额再处理）。
+   * 解除权限限制：统一请求后端 /api/unlock（需登录或匿名，后端扣配额），不再在前端本地解锁。
    */
   async function onUnlockClick(e) {
     var btn = e.target && e.target.closest ? e.target.closest('[data-unlock-index]') : e.target;
@@ -923,30 +835,13 @@
       showGlobalHint(errMsg || '解除失败。', true);
     } catch (err) {
       showDecryptProgress(false);
-      try {
-        var consumed = await consumeQuotaApi('unlock');
-        if (!consumed) {
-          showGlobalHint('解锁次数不足或请先登录。', true);
-          return;
-        }
-        var bytes = new Uint8Array(await item.file.arrayBuffer());
-        var saved = await unlockPdfToBytes(bytes);
-        if (saved != null && saved.length > 0) {
-          item.resultProtection = { blob: new Blob([saved], { type: 'application/pdf' }), name: nameWithoutExt(item.name) + '_unlocked.pdf' };
-          renderFileList();
-          showGlobalHint('已解除权限限制，请点击「下载」保存。');
-        } else {
-          showGlobalHint('解除失败或该 PDF 无需解除。', true);
-        }
-      } catch (e2) {
-        console.error(e2);
-        showGlobalHint('解除失败：' + (err && err.message ? err.message : '未知错误'), true);
-      }
+      console.error(err);
+      showGlobalHint('解除失败：' + (err && err.message ? err.message : '网络或服务器错误'), true);
     }
   }
 
   /**
-   * 解密：进入此弹窗时已是「需打开密码」，直接走后端 /api/crack-and-unlock（需登录，后端扣配额）；后端不可用时用前端暴力破解（先扣配额再破解）。
+   * 解密：进入此弹窗时已是「需打开密码」，统一走后端 /api/crack-and-unlock（需登录或匿名，后端扣配额），不再在前端暴力破解。
    */
   async function onDecryptModalCrack() {
     var index = pendingDecryptIndex;
@@ -986,32 +881,8 @@
       showGlobalHint(errJson.error || '未能破解密码。', true);
     } catch (err) {
       showDecryptProgress(false);
-      var consumed = await consumeQuotaApi('unlock');
-      if (!consumed) {
-        showGlobalHint('解锁次数不足或请先登录。', true);
-        return;
-      }
-      var bytes = new Uint8Array(await item.file.arrayBuffer());
-      var saved = await unlockPdfToBytes(bytes);
-      if (saved != null && saved.length > 0) {
-        item.resultProtection = { blob: new Blob([saved], { type: 'application/pdf' }), name: nameWithoutExt(item.name) + '_unlocked.pdf' };
-        renderFileList();
-        showGlobalHint('已解除限制（无需密码），请点击「下载」保存。');
-        return;
-      }
-      showDecryptProgress(true, 10);
-      var total = getCrackPasswordList().length;
-      var found = await crackPdfPassword(bytes, function (tried, tot) {
-        var pct = 10 + (total ? (tried / total) * 85 : 0);
-        showDecryptProgress(true, pct);
-      });
-      if (found !== null) {
-        showDecryptProgress(false);
-        await runDecrypt(index, found);
-      } else {
-        showDecryptProgress(false);
-        showGlobalHint('未能破解密码。', true);
-      }
+      console.error(err);
+      showGlobalHint('未能破解密码：' + (err && err.message ? err.message : '网络或服务器错误'), true);
     }
   }
 
@@ -1109,6 +980,11 @@
     if (textEl && text !== undefined) textEl.textContent = text || '加密中…';
   }
 
+  /** 规范打开密码：去除首尾空格。PDF 标准建议仅使用 ASCII/Latin-1 字符以保证各阅读器兼容。 */
+  function toPdfLatin1Password(str) {
+    return (typeof str === 'string' ? str : '').trim();
+  }
+
   async function runEncrypt(index, pwd, permsFromModal) {
     const item = getCurrentItems()[index];
     if (!item || !item.file) return;
@@ -1132,50 +1008,47 @@
     }
 
     try {
-      const bytes = new Uint8Array(await item.file.arrayBuffer());
-      const doc = await PDFDocument.load(bytes);
-      var ownerPwd = (typeof crypto !== 'undefined' && crypto.getRandomValues)
-        ? Array.from(crypto.getRandomValues(new Uint8Array(24)))
-            .map(function (c) { return ('0' + c.toString(16)).slice(-2); })
-            .join('')
-        : pwd + '_' + Date.now() + '_owner';
       var p = permsFromModal || {};
-      var userPwd = (typeof pwd === 'string' ? pwd : '') || '';
-      var securityOpt = {
-        userPassword: userPwd,
-        ownerPassword: ownerPwd,
-        permissions: {
-          modifying: !p.modifying,
-          copying: !p.copying,
-          annotating: !p.annotating,
-          documentAssembly: !p.documentAssembly,
-          fillingForms: !p.fillingForms,
-          contentAccessibility: !p.contentAccessibility,
-          printing: p.printing ? false : 'highResolution'
-        }
-      };
-      if (typeof doc.encrypt === 'function') {
-        doc.encrypt(securityOpt);
-      } else if (typeof doc.setProtection === 'function') {
-        doc.setProtection(securityOpt);
-      }
-      var saved = await doc.save({ useObjectStreams: false });
+      var userPwd = toPdfLatin1Password(typeof p.userPassword === 'string' ? p.userPassword : (typeof pwd === 'string' ? pwd : ''));
+      var ownerPwd = toPdfLatin1Password(typeof p.ownerPassword === 'string' ? p.ownerPassword : '');
+      var form = new FormData();
+      form.append('file', item.file);
+      form.append('user_password', userPwd);
+      form.append('owner_password', ownerPwd);
+      form.append('permissions', JSON.stringify({
+        modifying: p.modifying,
+        copying: p.copying,
+        annotating: p.annotating,
+        documentAssembly: p.documentAssembly,
+        fillingForms: p.fillingForms,
+        contentAccessibility: p.contentAccessibility,
+        printing: p.printing
+      }));
+
+      var res = await fetchWithAuth(API_BASE + '/api/encrypt', { method: 'POST', body: form });
 
       if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-      showEncryptProgress(true, 100, '加密完成');
+      showEncryptProgress(true, 100, res.ok ? '加密完成' : '加密失败');
 
-      item.resultProtection = { blob: new Blob([saved], { type: 'application/pdf' }), name: nameWithoutExt(item.name) + '_encrypted.pdf' };
-      var consumed = await consumeQuotaApi('encrypt');
-      if (!consumed) {
+      if (!res.ok) {
+        var errBody = await res.json().catch(function () { return {}; });
+        var errMsg = (errBody && errBody.error) ? errBody.error : (res.status === 403 ? '加密次数不足或请先登录。' : '加密失败');
         showEncryptProgress(false);
-        showGlobalHint('加密次数不足或请先登录。', true);
+        showGlobalHint(errMsg, true);
         return;
       }
+
+      var blob = await res.blob();
+      var disp = res.headers.get('Content-Disposition') || '';
+      var nameMatch = disp.match(/filename\*?=(?:UTF-8'')?"?([^";\n]+)"?/i) || disp.match(/filename="?([^";]+)"?/);
+      var outName = (nameMatch && nameMatch[1]) ? decodeURIComponent(nameMatch[1].trim()) : (nameWithoutExt(item.name) + '_encrypted.pdf');
+      item.resultProtection = { blob: blob, name: outName };
+      await loadQuota();
       renderFileList();
 
       setTimeout(function () {
         showEncryptProgress(false);
-        showGlobalHint('加密完成，请点击「下载」保存。');
+        showGlobalHint('加密完成，请点击「下载」保存。用您设置的密码即可在各类 PDF 阅读器中打开。');
       }, 500);
     } catch (e) {
       console.error(e);
@@ -1198,23 +1071,31 @@
     showLoading(true, '解密中…');
 
     try {
-      const bytes = new Uint8Array(await item.file.arrayBuffer());
-      var saved = await unlockPdfToBytes(bytes, pwd);
+      var form = new FormData();
+      form.append('file', item.file);
+      form.append('password', (typeof pwd === 'string' ? pwd : '') || '');
+      var res = await fetchWithAuth(API_BASE + '/api/unlock', { method: 'POST', body: form });
 
-      if (saved == null || saved.length === 0) {
+      if (res.ok) {
+        var blob = await res.blob();
+        var disp = res.headers.get('Content-Disposition') || '';
+        var nameMatch = disp.match(/filename\*?=(?:UTF-8'')?"?([^";\n]+)"?/i) || disp.match(/filename="?([^";]+)"?/);
+        var outName = (nameMatch && nameMatch[1]) ? decodeURIComponent(nameMatch[1].trim()) : (nameWithoutExt(item.name) + '_unlocked.pdf');
+        item.resultProtection = { blob: blob, name: outName };
+        await loadQuota();
+        renderFileList();
         showLoading(false);
-        showGlobalHint('解密失败，请检查密码是否正确。', true);
+        showGlobalHint('解密成功，请点击「下载」保存。');
         return;
       }
-
-      item.resultProtection = { blob: new Blob([saved], { type: 'application/pdf' }), name: nameWithoutExt(item.name) + '_unlocked.pdf' };
-      renderFileList();
+      var errBody = await res.json().catch(function () { return {}; });
+      var errMsg = (errBody && errBody.error) ? errBody.error : (res.status === 403 ? '解锁次数不足或请先登录。' : '解密失败，请检查密码是否正确。');
       showLoading(false);
-      showGlobalHint('解密成功，请点击「下载」保存。');
+      showGlobalHint(errMsg, true);
     } catch (e) {
       console.error(e);
       showLoading(false);
-      showGlobalHint('解密失败：' + (e && e.message ? e.message : '未知错误'), true);
+      showGlobalHint('解密失败：' + (e && e.message ? e.message : '网络或服务器错误'), true);
     }
   }
 
@@ -1226,72 +1107,6 @@
     return bytes;
   }
 
-  /**
-   * 将 Canvas 转为 JPEG 的 Uint8Array（供 pdf-lib embedJpg 使用）
-   * @param {HTMLCanvasElement} canvas
-   * @param {number} quality 0–1
-   * @returns {Promise<Uint8Array>}
-   */
-  function canvasToJpegBytes(canvas, quality) {
-    return new Promise(function (resolve, reject) {
-      try {
-        canvas.toBlob(function (blob) {
-          if (!blob) { reject(new Error('Canvas toBlob failed')); return; }
-          var reader = new FileReader();
-          reader.onloadend = function () { resolve(new Uint8Array(reader.result)); };
-          reader.onerror = reject;
-          reader.readAsArrayBuffer(blob);
-        }, 'image/jpeg', quality);
-      } catch (e) { reject(e); }
-    });
-  }
-
-  /**
-   * 图片重采样压缩：用 pdf.js 将每页渲染为 Canvas，导出为 JPEG 后由 pdf-lib 打包成新 PDF，显著减小体积。
-   * @param {Uint8Array} bytes 原 PDF
-   * @param {function(number, number, string)?} onProgress (currentPage, totalPages, text)
-   * @returns {Promise<Uint8Array>}
-   */
-  async function compressWithRaster(bytes, onProgress) {
-    var pdfjsLib = window.pdfjsLib;
-    if (!pdfjsLib || !pdfjsLib.getDocument) {
-      throw new Error('图片重采样需要 PDF.js，请刷新页面后重试。');
-    }
-    var scale = 2;
-    var jpegQuality = getCompressRasterQuality();
-    var loadingTask = pdfjsLib.getDocument({ data: bytes });
-    var pdfDoc = await loadingTask.promise;
-    var numPages = pdfDoc.numPages;
-    var canvas = document.createElement('canvas');
-    var ctx = canvas.getContext('2d');
-    var pageImages = [];
-
-    for (var p = 1; p <= numPages; p++) {
-      if (onProgress) onProgress(p, numPages, '正在渲染第 ' + p + '/' + numPages + ' 页…');
-      var page = await pdfDoc.getPage(p);
-      var viewport = page.getViewport({ scale: scale });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-      var jpegBytes = await canvasToJpegBytes(canvas, jpegQuality);
-      pageImages.push({ bytes: jpegBytes, width: viewport.width, height: viewport.height });
-    }
-
-    if (onProgress) onProgress(numPages, numPages, '正在生成新 PDF…');
-    var newDoc = await PDFDocument.create();
-    for (var i = 0; i < pageImages.length; i++) {
-      var img = pageImages[i];
-      var page = newDoc.addPage([img.width, img.height]);
-      var embedded = await newDoc.embedJpg(img.bytes);
-      page.drawImage(embedded, { x: 0, y: 0, width: img.width, height: img.height });
-    }
-    var version = getCompressCompatibility();
-    var useObjectStreams = version !== '1.4';
-    var saved = await newDoc.save({ useObjectStreams: useObjectStreams });
-    if (version === '1.7') saved = setPdfHeaderVersion(saved, '1.7');
-    return saved;
-  }
-
   async function runCompress(index, pwd) {
     const item = getCurrentItems()[index];
     if (!item || !item.file) return;
@@ -1301,23 +1116,49 @@
     var version = getCompressCompatibility();
     var useObjectStreams = version !== '1.4';
 
+    if (mode !== 'raster') {
+      try {
+        showLoading(true, '正在体积优化…');
+        var form = new FormData();
+        form.append('file', item.file);
+        var res = await fetchWithAuth(API_BASE + '/api/compress', { method: 'POST', body: form });
+        showLoading(false);
+        if (!res.ok) {
+          var errBody = await res.json().catch(function () { return {}; });
+          showGlobalHint((errBody && errBody.error) ? errBody.error : (res.status === 403 ? '体积优化次数不足或请先登录。' : '体积优化失败'), true);
+          return;
+        }
+        var blob = await res.blob();
+        var origBytes = item.file.size;
+        var newBytes = blob.size;
+        var smaller = newBytes < origBytes;
+        var disp = res.headers.get('Content-Disposition') || '';
+        var nameMatch = disp.match(/filename\*?=(?:UTF-8'')?"?([^";\n]+)"?/i) || disp.match(/filename="?([^";]+)"?/);
+        var outName = (nameMatch && nameMatch[1]) ? decodeURIComponent(nameMatch[1].trim()) : (nameWithoutExt(item.name) + '_compressed.pdf');
+        item.resultCompress = smaller ? { blob: blob, name: outName } : { blob: item.file, name: item.name };
+        await loadQuota();
+        renderFileList();
+        var origKb = (origBytes / 1024).toFixed(1);
+        var newKb = (newBytes / 1024).toFixed(1);
+        var savedPct = origBytes > 0 ? (100 - (newBytes / origBytes) * 100).toFixed(1) : '0';
+        var hint = smaller
+          ? '体积已优化，请点击「下载」保存。原大小约 <strong>' + origKb + ' KB</strong>，当前约 <strong>' + newKb + ' KB</strong>，较原文件减少约 <strong>' + savedPct + '%</strong>。'
+          : '文件体积已达最优。原大小约 <strong>' + origKb + ' KB</strong>，无需优化。';
+        showGlobalHint(hint);
+      } catch (e) {
+        console.error(e);
+        showLoading(false);
+        showGlobalHint('体积优化失败：' + (e && e.message ? e.message : '未知错误'), true);
+      }
+      return;
+    }
+
     try {
       const bytes = new Uint8Array(await item.file.arrayBuffer());
-      var saved;
-
-      if (mode === 'raster') {
-        showLoading(true, '正在准备图片重采样…');
-        saved = await compressWithRaster(bytes, function (current, total, text) {
-          showLoading(true, text);
-        });
-      } else {
-        showLoading(true, '正在体积优化…');
-        const loadOpts = item.encrypted ? { password: pwd || undefined } : {};
-        const doc = await PDFDocument.load(bytes, loadOpts);
-        saved = await doc.save({ useObjectStreams: useObjectStreams });
-        if (version === '1.7') saved = setPdfHeaderVersion(saved, '1.7');
-      }
-
+      showLoading(true, '正在准备图片重采样…');
+      var saved = await compressWithRaster(bytes, function (current, total, text) {
+        showLoading(true, text);
+      });
       var origBytes = item.file.size;
       var newBytes = saved.length;
       var smaller = newBytes < origBytes;
@@ -1336,13 +1177,10 @@
       showLoading(false);
       var origKb = (origBytes / 1024).toFixed(1);
       var newKb = (newBytes / 1024).toFixed(1);
-      var ratioPct = origBytes > 0 ? ((newBytes / origBytes) * 100).toFixed(1) : '0';
+      var savedPct = origBytes > 0 ? (100 - (newBytes / origBytes) * 100).toFixed(1) : '0';
       var hint = smaller
-        ? '体积已优化，请点击「下载」保存。原大小约 ' + origKb + ' KB，当前约 ' + newKb + ' KB，当前为原体积的 ' + ratioPct + '%。'
-        : '文件体积已达最优。原大小约 ' + origKb + ' KB，无需优化。';
-      if (smaller && parseFloat(ratioPct) >= 90 && mode !== 'raster') {
-        hint += ' 该文件可能已经过压缩，可尝试「图片重采样」模式进一步缩小。';
-      }
+        ? '体积已优化，请点击「下载」保存。原大小约 <strong>' + origKb + ' KB</strong>，当前约 <strong>' + newKb + ' KB</strong>，较原文件减少约 <strong>' + savedPct + '%</strong>。'
+        : '文件体积已达最优。原大小约 <strong>' + origKb + ' KB</strong>，无需优化。';
       showGlobalHint(hint);
     } catch (e) {
       console.error(e);
@@ -2011,7 +1849,15 @@
   if (dropdownProfile) dropdownProfile.addEventListener('click', openProfileModal);
   if (dropdownRecharge) dropdownRecharge.addEventListener('click', openRechargeModal);
   if (dropdownChangePassword) dropdownChangePassword.addEventListener('click', openChangePasswordModal);
-  if (dropdownLogout) dropdownLogout.addEventListener('click', function () { clearToken(); updateAuthUI(); updateUsageUI(); showGlobalHint('已退出登录。'); applyAdminRoute(); });
+  if (dropdownLogout) dropdownLogout.addEventListener('click', function () {
+    clearToken();
+    var pwdEl = document.getElementById('loginPassword');
+    if (pwdEl) pwdEl.value = '';
+    updateAuthUI();
+    updateUsageUI();
+    showGlobalHint('已退出登录。');
+    applyAdminRoute();
+  });
 
   var rechargeLoginBtn = document.getElementById('rechargeLoginBtn');
   if (rechargeLoginBtn) rechargeLoginBtn.addEventListener('click', openAuthModal);

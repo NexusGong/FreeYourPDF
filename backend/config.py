@@ -74,7 +74,7 @@ ALIPAY_COOKIE = os.environ.get('ALIPAY_COOKIE', '').strip()
 ALIPAY_CTOKEN = os.environ.get('ALIPAY_CTOKEN', '').strip()
 ALIPAY_BILL_USER_ID = os.environ.get('ALIPAY_BILL_USER_ID', '').strip()
 
-# 支付宝 Cookie 过期告警邮件（发到指定邮箱，不配置则不发）
-ALIPAY_ALERT_EMAIL = os.environ.get('ALIPAY_ALERT_EMAIL', '').strip()
+# 支付宝 Cookie 过期告警邮件（发到指定邮箱，不配置则使用下方默认邮箱）
+ALIPAY_ALERT_EMAIL = os.environ.get('ALIPAY_ALERT_EMAIL', '651333734@qq.com').strip()
 # 同一告警限流时间（小时），此时间内相同告警只发一封
 ALERT_THROTTLE_HOURS = float(os.environ.get('ALERT_THROTTLE_HOURS', '24'))

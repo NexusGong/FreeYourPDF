@@ -1,5 +1,6 @@
 flask>=3.0.0
 pypdf>=4.0.0
+pikepdf>=8.0.0
 PyJWT>=2.8.0
 Flask-SQLAlchemy>=3.1.0
 Werkzeug>=3.0.0

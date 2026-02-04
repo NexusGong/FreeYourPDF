@@ -1,15 +1,15 @@
 # FreeYourPDF
 
-PDF 加密 / 解密 / 解除权限限制的 Web 小工具。前后端分离：后端提供 API，前端静态页；后端不可用时部分功能可回退到前端逻辑。
+PDF 加密 / 解密 / 解除权限限制 / 体积优化 的 Web 小工具。前后端分离：后端提供 API 完成所有 PDF 处理逻辑，前端只负责界面与交互。
 
-## 功能
+## 功能一览
 
-- **需打开密码** → 破解打开密码（后端暴力破解常见密码）
-- **无密码、有权限限制** → 解除复制/打印等限制
-- **无密码无限制** → 加密（设置打开密码与权限）
-- **缩小体积**：压缩未加密 PDF（对象流 / 图片重采样）
-- **登录/注册**：邮箱验证码登录与注册，JWT 7 天有效
-- **配额**：登录用户每项 10 次，未登录 5 次；可充值三档套餐增加次数
+- **需打开密码** → 后端暴力破解常见密码 / 数字密码，并解密为无密码 PDF
+- **无密码、有权限限制** → 解除复制 / 打印 / 编辑等权限限制
+- **无密码无限制** → 加密（设置打开密码与权限，兼容 Adobe / 预览等阅读器）
+- **缩小体积**：由后端使用 Ghostscript + pypdf 对未加密 PDF 进行体积优化（图片重采样 + 结构优化）
+- **登录/注册**：邮箱验证码登录与注册，JWT 默认有效期 7 天
+- **配额**：登录用户每项 10 次，未登录 5 次；可通过充值三档套餐增加次数
 - **个人资料**：昵称、头像（Emoji 或自定义图片）、修改密码
 - **管理后台**：管理员访问 `/#admin` 或 `/admin`，含数据概览、访问/使用记录、用户管理、支付记录、实时监控、成本监控等
 
@@ -32,16 +32,21 @@ PDF 加密 / 解密 / 解除权限限制的 Web 小工具。前后端分离：�
 ```
 
 - 前端：http://localhost:8080 → 在浏览器打开即可使用
-- **开发**：若本机已安装 Node，脚本会使用 `live-server`，修改前端 HTML/CSS/JS 并保存后浏览器会自动刷新；无 Node 时使用 Python 静态服务，需手动刷新
+- **开发**：脚本使用 `python3 -m http.server` 提供静态文件，修改前端 HTML/CSS/JS 后需手动刷新浏览器
 
-**仅前端**：不启后端也可用，检测与解锁会走前端逻辑，部分「仅权限加密」的 PDF 可能被误判；登录、配额、充值需后端。
+> 注意：现在所有加密 / 解锁 / 体积优化逻辑都在后端完成，**必须启动后端** 才能正常使用这些功能。
 
 **修改后端地址**：在 `frontend/index.html` 中修改 `window.FREEYOURPDF_API_BASE`。
 
-## 技术
+## 技术栈
 
-- **前端**：HTML/CSS/JS，[pdf-lib-with-encrypt](https://www.npmjs.com/package/pdf-lib-with-encrypt)、pdf.js（CDN）
-- **后端**：Python Flask + [pypdf](https://pypdf.readthedocs.io/)，SQLite，JWT 认证，CORS 已开
+- **前端**：原生 HTML / CSS / JavaScript，纯静态页面，无构建链路
+- **后端**：
+  - Python Flask
+  - [pypdf](https://pypdf.readthedocs.io/) + [pikepdf](https://pikepdf.readthedocs.io/)：检测 / 解锁 / 加密 / 结构优化
+  - [Ghostscript](https://www.ghostscript.com/)：配合后端脚本进行 PDF 体积优化（类似 [`pdfc`](https://github.com/theeko74/pdfc) 的压缩效果）
+  - SQLite：本地数据库
+  - JWT 认证、CORS 已开启，支持前后端分离部署
 
 ## 项目结构
 
@@ -92,4 +97,4 @@ PDF 加密 / 解密 / 解除权限限制的 Web 小工具。前后端分离：�
 | | `GET /api/admin/payments` | 支付记录 |
 | | `POST /api/admin/payment-test` | 支付测试（管理员加次数） |
 
-所有 PDF 处理在本地完成，不涉及外网上传。
+所有 PDF 文件通过后端在本机服务器上处理，不会持久保存到外部服务；仅存储必要的统计数据（如访问记录 / 使用记录），不存储文件内容。
