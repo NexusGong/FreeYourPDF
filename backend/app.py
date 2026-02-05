@@ -58,6 +58,67 @@ with app.app_context():
         print('[FreeYourPDF] usage_record 表补列:', e, flush=True)
         sys.stdout.flush()
 
+    # 启动时自动创建或提升初始管理员（Render 等线上环境配置 INITIAL_ADMIN_EMAIL + INITIAL_ADMIN_PASSWORD）
+    def _ensure_initial_admin():
+        email = (config_module.INITIAL_ADMIN_EMAIL or '').strip()
+        password = (config_module.INITIAL_ADMIN_PASSWORD or '').strip()
+        username_cfg = (config_module.INITIAL_ADMIN_USERNAME or '').strip()
+        if not email:
+            return
+        existing_admin = User.query.filter_by(is_admin=True).first()
+        if existing_admin:
+            # 已有管理员：若配置了邮箱，则确保该邮箱用户也是管理员
+            u = User.query.filter_by(email=email).first()
+            if u and not u.is_admin:
+                u.is_admin = True
+                if password:
+                    u.set_password(password)
+                db.session.commit()
+                print('[FreeYourPDF] 初始管理员：已将已有用户 %s 提升为管理员' % email, flush=True)
+            return
+        # 当前没有任何管理员
+        u = User.query.filter_by(email=email).first()
+        if u:
+            u.is_admin = True
+            if password:
+                u.set_password(password)
+            db.session.commit()
+            print('[FreeYourPDF] 初始管理员：已将已有用户 %s 提升为管理员' % email, flush=True)
+            return
+        if not password:
+            print('[FreeYourPDF] 初始管理员：未配置 INITIAL_ADMIN_PASSWORD，无法自动创建新管理员账号', flush=True)
+            return
+        # 创建新管理员用户
+        base_username = username_cfg or (email.split('@')[0] if '@' in email else 'admin')
+        base_username = base_username[:32] or 'admin'
+        username = base_username
+        n = 0
+        while User.query.filter_by(username=username).first():
+            n += 1
+            username = (base_username + '_%d' % n)[:32]
+        new_user = User(email=email, username=username, is_admin=True)
+        new_user.set_password(password)
+        db.session.add(new_user)
+        db.session.flush()
+        quota = Quota(
+            user_id=new_user.id,
+            encrypt_remaining=config_module.DEFAULT_QUOTA_ENCRYPT,
+            unlock_remaining=config_module.DEFAULT_QUOTA_UNLOCK,
+            compress_remaining=config_module.DEFAULT_QUOTA_COMPRESS,
+        )
+        db.session.add(quota)
+        db.session.commit()
+        print('[FreeYourPDF] 初始管理员：已自动创建管理员账号 %s（用户名 %s）' % (email, new_user.username), flush=True)
+
+    try:
+        _ensure_initial_admin()
+    except Exception as e:
+        print('[FreeYourPDF] 初始管理员执行失败: %s' % e, flush=True)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
 # 预加载支付宝验证器（仅在实际对外服务的进程中执行，避免 reloader 时重复日志）
 if os.environ.get('WERKZEUG_RUN_MAIN', 'true') != 'false':
     try:
