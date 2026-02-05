@@ -7,9 +7,15 @@ from gunicorn import glogging
 class _HealthCheckFilter(logging.Filter):
     """过滤掉对 /api/health 的访问日志（Render/负载均衡等健康检查），避免日志刷屏。"""
     def filter(self, record):
-        msg = record.getMessage()
-        if '"/api/health' in msg or "GET /api/health" in msg:
-            return False
+        try:
+            msg = record.getMessage()
+            if not msg:
+                return True
+            # 匹配多种可能的日志格式：GET /api/health, "/api/health, /api/health HTTP/1.1 等
+            if '/api/health' in msg and ('GET' in msg or '200' in msg or 'Render' in msg):
+                return False
+        except Exception:
+            pass
         return True
 
 

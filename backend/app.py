@@ -191,6 +191,17 @@ def _log(msg):
     sys.stdout.flush()
 
 
+def _log_error(operation, error, details=None):
+    """统一错误日志输出，确保在 Render 等生产环境可见。"""
+    msg = '[FreeYourPDF] %s 错误: %s' % (operation, str(error))
+    if details:
+        msg += ' | 详情: ' + str(details)
+    print(msg, flush=True)
+    sys.stdout.flush()
+    import traceback
+    traceback.print_exc(file=sys.stdout)
+    sys.stdout.flush()
+
 class _suppress_pdf_warnings:
     """临时屏蔽底层 PDF 库在 stdout/stderr 上的噪音日志，只保留我们自己的 _log 输出。"""
 
@@ -844,7 +855,8 @@ def api_payment_confirm():
         except Exception as e:
             _log('支付确认：验证异常 - %s' % e)
             import traceback
-            traceback.print_exc()
+            traceback.print_exc(file=sys.stdout)
+            sys.stdout.flush()
             return jsonify({'error': '支付验证异常，请稍后再试。', 'detail': str(e)}), 500
 
     _log('支付确认：已完成到账，订单 %s' % transaction_id)
@@ -1441,8 +1453,11 @@ def api_unlock():
         )
     except Exception as e:
         import traceback
-        traceback.print_exc()
-        return jsonify({'error': '解锁失败：' + str(e)}), 400
+        err_msg = '解锁失败：' + str(e)
+        print('[FreeYourPDF] 解锁异常:', err_msg, flush=True)
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+        return jsonify({'error': err_msg}), 400
 
 
 # PDF 权限位（Table 3.20）：与 pypdf.constants.UserAccessPermissions 一致
@@ -1540,9 +1555,13 @@ def _compress_pdf_with_ghostscript(data, quality='/ebook'):
             f'-sOutputFile={out_path}',
             in_path,
         ]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
         if proc.returncode != 0 or not os.path.exists(out_path):
-            raise RuntimeError('ghostscript compress failed: %s' % (proc.stderr.decode('utf-8', errors='ignore') or proc.returncode))
+            stderr_msg = proc.stderr.decode('utf-8', errors='ignore')[:500] if proc.stderr else ''
+            err_detail = 'returncode=%d, stderr=%s' % (proc.returncode, stderr_msg)
+            print('[FreeYourPDF] Ghostscript 压缩失败:', err_detail, flush=True)
+            sys.stdout.flush()
+            raise RuntimeError('ghostscript compress failed: %s' % (stderr_msg or proc.returncode))
         with open(out_path, 'rb') as f_out:
             out_bytes = f_out.read()
         if not out_bytes:
@@ -1596,26 +1615,36 @@ def api_encrypt():
         # 有打开密码：用 pikepdf，user=owner=打开密码；仅权限无打开密码：用 pikepdf，user=''、owner=权限密码，保证 Acrobat 中「操作权限密码」正确
         use_pikepdf = bool(user_password) or (permissions_flag != -1)
         if use_pikepdf:
-            stream_in = io.BytesIO(data)
-            pdf = pikepdf.Pdf.open(stream_in)
-            out = io.BytesIO()
-            allow = None
-            if perms_json:
-                try:
-                    import json as _json
-                    perms = _json.loads(perms_json)
-                    allow = _pikepdf_permissions(perms)
-                except Exception:
-                    pass
-            if user_password:
-                # 打开需要密码：user 与 owner 同密码，用该密码打开即拥有全部权限
-                enc = pikepdf.Encryption(user=user_password, owner=user_password, R=4, allow=allow)
-            else:
-                # 仅权限、无打开密码：user 为空（任何人可打开），owner 为前端传的权限密码（在阅读器中修改安全设置时输入）
-                enc = pikepdf.Encryption(user='', owner=owner_password, R=4, allow=allow)
-            pdf.save(out, encryption=enc)
-            pdf.close()
-            out.seek(0)
+            try:
+                stream_in = io.BytesIO(data)
+                pdf = pikepdf.Pdf.open(stream_in)
+                out = io.BytesIO()
+                allow = None
+                if perms_json:
+                    try:
+                        import json as _json
+                        perms = _json.loads(perms_json)
+                        allow = _pikepdf_permissions(perms)
+                    except Exception as perm_err:
+                        print('[FreeYourPDF] 加密：解析权限 JSON 失败:', str(perm_err), flush=True)
+                        sys.stdout.flush()
+                if user_password:
+                    # 打开需要密码：user 与 owner 同密码，用该密码打开即拥有全部权限
+                    enc = pikepdf.Encryption(user=user_password, owner=user_password, R=4, allow=allow)
+                else:
+                    # 仅权限、无打开密码：user 为空（任何人可打开），owner 为前端传的权限密码（在阅读器中修改安全设置时输入）
+                    enc = pikepdf.Encryption(user='', owner=owner_password, R=4, allow=allow)
+                pdf.save(out, encryption=enc)
+                pdf.close()
+                out.seek(0)
+                print('[FreeYourPDF] 加密：pikepdf 加密成功', flush=True)
+            except Exception as pikepdf_err:
+                print('[FreeYourPDF] 加密：pikepdf 失败，回退到 pypdf:', str(pikepdf_err), flush=True)
+                import traceback
+                traceback.print_exc(file=sys.stdout)
+                sys.stdout.flush()
+                use_pikepdf = False
+                out = None
         if out is None:
             # 无权限限制且无密码：用 pypdf 做无加密或仅占位
             stream2 = io.BytesIO(data)
@@ -1646,8 +1675,11 @@ def api_encrypt():
         )
     except Exception as e:
         import traceback
-        traceback.print_exc()
-        return jsonify({'error': '加密失败：' + str(e)}), 400
+        err_msg = '加密失败：' + str(e)
+        print('[FreeYourPDF] 加密异常:', err_msg, flush=True)
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+        return jsonify({'error': err_msg}), 400
 
 
 @app.route('/api/compress', methods=['POST'])
@@ -1686,7 +1718,10 @@ def api_compress():
         # 1) 尝试用 Ghostscript 进行有损压缩（默认使用 /ebook：150dpi 左右，兼顾质量与体积）
         try:
             compressed_bytes = _compress_pdf_with_ghostscript(data, quality='/ebook')
-        except Exception:
+            print('[FreeYourPDF] 体积优化：Ghostscript 压缩成功', flush=True)
+        except Exception as gs_err:
+            print('[FreeYourPDF] 体积优化：Ghostscript 不可用或失败，回退到 pypdf 结构优化:', str(gs_err), flush=True)
+            sys.stdout.flush()
             # 2) Ghostscript 不可用或失败时，退回到 pypdf 结构优化（无损或轻微压缩）
             stream2 = io.BytesIO(data)
             with _suppress_pdf_warnings():
@@ -1699,6 +1734,7 @@ def api_compress():
                 writer.write(out_buf)
                 out_buf.seek(0)
                 compressed_bytes = out_buf.getvalue()
+                print('[FreeYourPDF] 体积优化：pypdf 结构优化完成，输出大小 %d 字节' % len(compressed_bytes), flush=True)
 
         _record_usage(user_id, anonymous_id, 'compress', '/api/compress', 200)
         base_name = (f.filename or 'output.pdf').replace('.pdf', '')
@@ -1710,8 +1746,11 @@ def api_compress():
         )
     except Exception as e:
         import traceback
-        traceback.print_exc()
-        return jsonify({'error': '体积优化失败：' + str(e)}), 400
+        err_msg = '体积优化失败：' + str(e)
+        print('[FreeYourPDF] 体积优化异常:', err_msg, flush=True)
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+        return jsonify({'error': err_msg}), 400
 
 
 @app.route('/api/crack-and-unlock', methods=['POST'])
@@ -1734,14 +1773,17 @@ def api_crack_and_unlock():
     data = f.read()
     stream = io.BytesIO(data)
     passwords = _password_list()
-    for pwd in passwords:
+    last_err = None
+    for idx, pwd in enumerate(passwords):
         stream.seek(0)
         try:
             reader = PdfReader(stream)
             if not reader.is_encrypted:
+                print('[FreeYourPDF] 暴力破解：PDF 未加密，无需破解', flush=True)
                 break
             reader.decrypt(pwd)
             if len(reader.pages) > 0:
+                print('[FreeYourPDF] 暴力破解：成功，密码为 "%s"（尝试 %d/%d）' % (pwd, idx + 1, len(passwords)), flush=True)
                 writer = PdfWriter()
                 for page in reader.pages:
                     writer.add_page(page)
@@ -1755,9 +1797,20 @@ def api_crack_and_unlock():
                     as_attachment=True,
                     download_name=(f.filename or 'output.pdf').replace('.pdf', '_unlocked.pdf')
                 )
-        except Exception:
+        except Exception as e:
+            last_err = e
+            if idx < 5 or idx % 10 == 0:
+                print('[FreeYourPDF] 暴力破解：尝试密码 "%s" 失败: %s' % (pwd, str(e)), flush=True)
             continue
-    return jsonify({'error': '未能破解密码'}), 400
+    err_msg = '未能破解密码（已尝试 %d 个密码）' % len(passwords)
+    if last_err:
+        print('[FreeYourPDF] 暴力破解失败:', err_msg, '最后错误:', str(last_err), flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stdout)
+    else:
+        print('[FreeYourPDF] 暴力破解失败:', err_msg, flush=True)
+    sys.stdout.flush()
+    return jsonify({'error': err_msg}), 400
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
