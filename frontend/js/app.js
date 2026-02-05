@@ -2256,31 +2256,28 @@
 
   var authUserTrigger = document.getElementById('authUserTrigger');
   if (authUserTrigger) authUserTrigger.addEventListener('click', function (e) { e.stopPropagation(); toggleUserDropdown(); });
-  document.addEventListener('click', function () { closeUserDropdown(); });
+  document.addEventListener('click', function (e) {
+    var dropdown = document.getElementById('authUserDropdown');
+    var wrap = document.getElementById('authUserWrap');
+    if (dropdown && wrap && !wrap.contains(e.target)) {
+      closeUserDropdown();
+    }
+  });
   var authUserWrap = document.getElementById('authUserWrap');
   if (authUserWrap) authUserWrap.addEventListener('click', function (e) { e.stopPropagation(); });
-  
-  // 移动端优化：点击下拉菜单项后自动关闭菜单
-  var dropdownItems = document.querySelectorAll('.auth-dropdown-item');
-  dropdownItems.forEach(function(item) {
-    item.addEventListener('click', function() {
-      // 移动端延迟关闭，确保点击事件完成
-      if (window.matchMedia('(max-width: 768px)').matches) {
-        setTimeout(function() {
-          closeUserDropdown();
-        }, 100);
-      }
-    });
-  });
+  var authUserDropdown = document.getElementById('authUserDropdown');
+  if (authUserDropdown) authUserDropdown.addEventListener('click', function (e) { e.stopPropagation(); });
 
   var dropdownProfile = document.getElementById('dropdownProfile');
   var dropdownRecharge = document.getElementById('dropdownRecharge');
   var dropdownChangePassword = document.getElementById('dropdownChangePassword');
   var dropdownLogout = document.getElementById('dropdownLogout');
-  if (dropdownProfile) dropdownProfile.addEventListener('click', openProfileModal);
-  if (dropdownRecharge) dropdownRecharge.addEventListener('click', openRechargeModal);
-  if (dropdownChangePassword) dropdownChangePassword.addEventListener('click', openChangePasswordModal);
-  if (dropdownLogout) dropdownLogout.addEventListener('click', function () {
+  if (dropdownProfile) dropdownProfile.addEventListener('click', function (e) { e.stopPropagation(); openProfileModal(); });
+  if (dropdownRecharge) dropdownRecharge.addEventListener('click', function (e) { e.stopPropagation(); openRechargeModal(); });
+  if (dropdownChangePassword) dropdownChangePassword.addEventListener('click', function (e) { e.stopPropagation(); openChangePasswordModal(); });
+  if (dropdownLogout) dropdownLogout.addEventListener('click', function (e) {
+    e.stopPropagation();
+    closeUserDropdown();
     clearToken();
     updateAuthUI();
     updateUsageUI();

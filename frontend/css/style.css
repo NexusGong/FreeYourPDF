@@ -1730,6 +1730,8 @@ body[data-glow-level="2"] .glow-level-dot { background: var(--primary); opacity:
     text-overflow: ellipsis;
     max-width: 100px;
     min-width: 0;
+    -webkit-tap-highlight-color: rgba(124, 58, 237, 0.2);
+    touch-action: manipulation;
   }
 
   .auth-user {
@@ -1748,68 +1750,36 @@ body[data-glow-level="2"] .glow-level-dot { background: var(--primary); opacity:
     flex-shrink: 0;
   }
 
-  /* 移动端用户下拉菜单优化 */
+  /* 移动端下拉菜单优化 */
   .auth-user-wrap {
-    position: relative;
+    position: static;
   }
 
   .auth-user-dropdown {
     position: fixed;
     top: auto;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    bottom: max(env(safe-area-inset-bottom), var(--space-md));
+    left: 50%;
+    right: auto;
+    min-width: auto;
+    width: calc(100% - 2 * var(--space-md));
+    max-width: 320px;
     margin: 0;
-    min-width: 0;
-    width: 100%;
-    max-width: 100%;
-    border-radius: var(--radius) var(--radius) 0 0;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-    padding: var(--space-md);
-    padding-bottom: max(var(--space-md), env(safe-area-inset-bottom));
-    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border);
-    transform: translateY(100%);
-    max-height: 60vh;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    z-index: 1001;
+    transform: translateX(-50%) translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border), 0 0 20px var(--primary-glow-soft);
+    z-index: 9999;
   }
 
   .auth-user-dropdown[aria-hidden="false"] {
-    transform: translateY(0);
-  }
-
-  /* 移动端下拉菜单打开时的背景遮罩 */
-  .auth-user-dropdown[aria-hidden="false"]::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: -1;
-    top: -100vh;
-    left: -100vw;
-    width: 200vw;
-    height: 200vh;
+    transform: translateX(-50%) translateY(0);
   }
 
   .auth-dropdown-item {
-    padding: 0.85rem 1rem;
-    font-size: 1rem;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    border-radius: var(--radius-sm);
-    margin-bottom: 0.25rem;
-  }
-
-  .auth-dropdown-item:last-child {
-    margin-bottom: 0;
-  }
-
-  .auth-dropdown-divider {
-    margin: var(--space-sm) 0;
+    min-height: 44px;
+    padding: 0.75rem 1rem;
+    font-size: 0.95rem;
+    -webkit-tap-highlight-color: rgba(124, 58, 237, 0.2);
+    touch-action: manipulation;
   }
 
   .glow-level-btn {
@@ -2026,6 +1996,7 @@ body[data-glow-level="2"] .glow-level-dot { background: var(--primary); opacity:
     padding-left: max(var(--space-md), env(safe-area-inset-left));
     padding-right: max(var(--space-md), env(safe-area-inset-right));
     align-items: flex-end;
+    -webkit-overflow-scrolling: touch;
   }
 
   .modal {
@@ -2033,186 +2004,61 @@ body[data-glow-level="2"] .glow-level-dot { background: var(--primary); opacity:
     width: 100%;
     max-height: 88vh;
     border-radius: var(--radius) var(--radius) 0 0;
-    padding: var(--space-lg);
     padding-bottom: max(var(--space-xl), env(safe-area-inset-bottom));
-    overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
-  .modal-title {
-    font-size: 1.25rem;
-    margin-bottom: var(--space-md);
-  }
-
-  .modal-actions {
-    gap: 0.75rem;
-    margin-top: var(--space-lg);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--border);
-  }
-
+  /* 移动端弹窗按钮优化 */
   .modal-actions .btn {
-    flex: 1;
-    min-height: 48px;
-    font-size: 1rem;
+    -webkit-tap-highlight-color: rgba(124, 58, 237, 0.3);
+    touch-action: manipulation;
   }
 
   /* 移动端个人资料弹窗优化 */
-  .profile-modal {
-    padding: var(--space-lg);
-  }
-
-  .profile-section {
-    margin-bottom: var(--space-lg);
-  }
-
-  .profile-section-title {
-    font-size: 0.75rem;
-    margin-bottom: var(--space-sm);
-    padding-bottom: var(--space-xs);
+  .profile-modal-redesign {
+    max-width: none;
+    width: 100%;
   }
 
   .profile-info-row {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-xs);
-    margin-bottom: var(--space-md);
-    padding-bottom: var(--space-sm);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .profile-info-row:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
   }
 
   .profile-info-label {
-    flex: none;
+    flex: 0 0 auto;
     width: 100%;
-    font-size: 0.85rem;
-    font-weight: 500;
     margin-bottom: 0.25rem;
   }
 
   .profile-info-value,
   .profile-input-inline {
     width: 100%;
-    flex: none;
-    min-height: 44px;
-    font-size: 16px; /* 避免 iOS 输入框聚焦放大 */
+    flex: 1 1 100%;
   }
 
   .profile-avatar-row {
-    align-items: flex-start;
-  }
-
-  .profile-avatar-row .profile-info-label {
-    margin-top: 0;
-  }
-
-  .profile-avatar-preview-row {
-    width: 100%;
     flex-direction: column;
     align-items: flex-start;
-    gap: var(--space-sm);
   }
 
-  .profile-avatar-preview {
-    width: 80px;
-    height: 80px;
-  }
-
-  .profile-avatar-toggle-btn {
+  .profile-avatar-block {
     width: 100%;
-    min-height: 44px;
   }
 
   .profile-avatar-library {
-    grid-template-columns: repeat(4, 1fr);
-    gap: var(--space-sm);
+    grid-template-columns: repeat(5, 1fr);
   }
 
-  .profile-avatar-option {
-    font-size: 1.75rem;
-    min-height: 60px;
-  }
-
-  .profile-usage-grid {
-    gap: var(--space-xs);
-  }
-
-  .profile-usage-item {
-    padding: 0.75rem 1rem;
-    min-height: 48px;
-    font-size: 0.95rem;
-  }
-
-  .profile-modal-hint {
-    font-size: 0.9rem;
-    margin-top: var(--space-md);
-    padding: var(--space-sm);
-    border-radius: var(--radius-sm);
-  }
-
-  /* 移动端修改密码弹窗优化 */
-  .change-password-modal {
-    padding: var(--space-lg);
-  }
-
-  .change-password-modal .modal-label {
-    font-size: 0.9rem;
-    margin-bottom: var(--space-xs);
-    margin-top: var(--space-md);
-  }
-
-  .change-password-modal .modal-label:first-child {
-    margin-top: 0;
-  }
-
-  .change-password-modal .input {
-    min-height: 44px;
-    font-size: 16px; /* 避免 iOS 输入框聚焦放大 */
-    margin-bottom: var(--space-xs);
-  }
-
-  .change-password-hint {
-    margin-top: var(--space-sm);
-    padding: var(--space-sm);
-    border-radius: var(--radius-sm);
-    font-size: 0.9rem;
-  }
-
-  /* 移动端充值支付弹窗优化 */
+  /* 移动端支付弹窗优化 */
   .pay-modal {
-    padding: var(--space-lg);
-  }
-
-  .pay-modal-header {
-    margin-bottom: var(--space-md);
-  }
-
-  .pay-modal-title {
-    font-size: 1.2rem;
-    margin-bottom: var(--space-xs);
-  }
-
-  .pay-modal-desc {
-    font-size: 0.85rem;
-    line-height: 1.6;
-  }
-
-  .pay-plans-label {
-    font-size: 0.75rem;
-    margin-bottom: var(--space-xs);
-  }
-
-  .pay-plan-list {
-    gap: var(--space-xs);
-    margin-bottom: var(--space-md);
+    max-width: none;
+    width: 100%;
   }
 
   .pay-plan-card {
-    padding: var(--space-md);
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-sm);
@@ -2222,61 +2068,17 @@ body[data-glow-level="2"] .glow-level-dot { background: var(--primary); opacity:
     width: 100%;
   }
 
-  .pay-plan-count {
-    font-size: 1.35rem;
-  }
-
   .pay-plan-price {
-    font-size: 1.1rem;
     align-self: flex-end;
   }
 
-  .pay-confirm-wrap {
-    padding: var(--space-sm);
-    margin-bottom: var(--space-md);
+  .modal-actions {
+    gap: 0.75rem;
   }
 
-  .pay-confirm-label {
-    font-size: 0.85rem;
-    margin-bottom: var(--space-sm);
-  }
-
-  .pay-confirm-btn {
-    width: 100%;
+  .modal-actions .btn {
+    flex: 1;
     min-height: 48px;
-    font-size: 1rem;
-  }
-
-  .pay-order-panel {
-    padding: var(--space-md);
-    margin-bottom: var(--space-md);
-  }
-
-  .pay-qr-box {
-    min-height: 180px;
-    padding: var(--space-sm);
-  }
-
-  .pay-qr-img {
-    max-width: 200px;
-    min-height: 150px;
-  }
-
-  .pay-order-row {
-    font-size: 0.85rem;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
-  }
-
-  .pay-copy-btn {
-    min-height: 36px;
-    padding: 0.4rem 0.75rem;
-    font-size: 0.85rem;
-  }
-
-  .pay-paid-btn {
-    min-height: 48px;
-    font-size: 1rem;
   }
 
   .checkbox-label {
@@ -2358,6 +2160,19 @@ body[data-glow-level="2"] .glow-level-dot { background: var(--primary); opacity:
   .auth-user {
     font-size: 0.75rem;
     max-width: 50px;
+  }
+
+  /* 超小屏幕下拉菜单优化 */
+  .auth-user-dropdown {
+    left: 50%;
+    right: auto;
+    width: calc(100% - 2 * var(--space-sm));
+    max-width: 280px;
+    transform: translateX(-50%) translateY(-4px);
+  }
+
+  .auth-user-dropdown[aria-hidden="false"] {
+    transform: translateX(-50%) translateY(0);
   }
 
   .glow-level-btn,
