@@ -5,8 +5,26 @@
 
   const STORAGE_KEY_TOKEN = 'freeyourpdf_token';
   const STORAGE_KEY_ANONYMOUS_ID = 'freeyourpdf_anonymous_id';
+  const STORAGE_KEY_GLOW_LEVEL = 'freeyourpdf_glow_level';
   var currentUser = null;
   var stateQuota = null;
+
+  function getGlowLevel() {
+    var v = parseInt(localStorage.getItem(STORAGE_KEY_GLOW_LEVEL), 10);
+    return (v === 1 || v === 2) ? v : 0;
+  }
+  function setGlowLevel(level) {
+    level = level % 3;
+    localStorage.setItem(STORAGE_KEY_GLOW_LEVEL, String(level));
+    if (document.body) {
+      if (level === 0) document.body.removeAttribute('data-glow-level');
+      else document.body.setAttribute('data-glow-level', String(level));
+    }
+  }
+  function cycleGlowLevel() {
+    var next = (getGlowLevel() + 1) % 3;
+    setGlowLevel(next);
+  }
 
   function getToken() {
     return localStorage.getItem(STORAGE_KEY_TOKEN);
@@ -530,10 +548,12 @@
     var intros = {
       encrypt: '支持多选，可对未加密的 PDF 进行加密。',
       unlock: '支持多选，可对需密码或有权限限制的 PDF 进行解锁（系统破解或解除限制）。',
-      compress: '支持多选，可对未加密的 PDF 进行体积优化。已加密的 PDF 请先解锁后再使用本功能。'
+      compress: '可对未加密的 PDF 进行体积优化。已加密的 PDF 请先解锁后再使用本功能。'
     };
     var strongNote = (t === 'encrypt')
       ? ' <strong>设置打开密码时由服务端加密，保证用您设置的密码可在 Adobe、预览等阅读器中正确打开。</strong>'
+      : (t === 'compress')
+      ? ' <strong>设备本地处理，文件不上传服务器，隐私与安全有保障。</strong>'
       : ' <strong>全部在您设备本地处理，文件不上传服务器，隐私与安全有保障。</strong>';
     if (titleEl) titleEl.textContent = titles[t] || titles.encrypt;
     if (descEl) descEl.innerHTML = (intros[t] || intros.encrypt) + strongNote;
@@ -1987,6 +2007,10 @@
 
   var authCompleteRegisterBtn = document.getElementById('authCompleteRegister');
   if (authCompleteRegisterBtn) authCompleteRegisterBtn.addEventListener('click', onAuthCompleteRegister);
+
+  setGlowLevel(getGlowLevel());
+  var glowLevelBtn = document.getElementById('glowLevelBtn');
+  if (glowLevelBtn) glowLevelBtn.addEventListener('click', cycleGlowLevel);
 
   async function initAuth() {
     if (getToken()) {

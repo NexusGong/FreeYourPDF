@@ -29,7 +29,12 @@
             <p class="tagline">PDF 加密 · 解锁 · 体积优化</p>
           </div>
         </div>
-        <div class="auth-area" id="authArea">
+        <div class="header-right">
+          <button type="button" id="glowLevelBtn" class="glow-level-btn" aria-label="发光档位" title="点击切换发光强度（共三档）">
+            <span class="glow-level-icon" aria-hidden="true">💡</span>
+            <span class="glow-level-dot" id="glowLevelDot" aria-hidden="true"></span>
+          </button>
+          <div class="auth-area" id="authArea">
           <div class="auth-user-wrap" id="authUserWrap" aria-hidden="true">
             <button type="button" class="auth-user-trigger" id="authUserTrigger" aria-expanded="false" aria-haspopup="true">
               <span class="auth-user-avatar" id="authUserAvatarWrap">
@@ -50,6 +55,7 @@
           <button type="button" class="btn btn-primary btn-circle" id="btnAuth">
             登录
           </button>
+          </div>
         </div>
       </div>
     </header>

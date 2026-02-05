@@ -75,45 +75,52 @@ with app.app_context():
         print('[FreeYourPDF] user 表补列:', e, flush=True)
         sys.stdout.flush()
 
-    # 启动时自动创建或提升初始管理员（Render 等线上环境配置 INITIAL_ADMIN_EMAIL + INITIAL_ADMIN_PASSWORD）
+    # 启动时自动创建或提升初始管理员（Render 等线上环境配置 INITIAL_ADMIN_PHONE + INITIAL_ADMIN_PASSWORD）
     def _ensure_initial_admin():
-        email = (config_module.INITIAL_ADMIN_EMAIL or '').strip()
+        import re
+        phone = (config_module.INITIAL_ADMIN_PHONE or '').strip().replace(' ', '').replace('-', '')
         password = (config_module.INITIAL_ADMIN_PASSWORD or '').strip()
         username_cfg = (config_module.INITIAL_ADMIN_USERNAME or '').strip()
-        if not email:
+        if not phone or not re.match(r'^1\d{10}$', phone):
             return
         existing_admin = User.query.filter_by(is_admin=True).first()
+        u = User.query.filter_by(phone=phone).first()
         if existing_admin:
-            # 已有管理员：若配置了邮箱，则确保该邮箱用户也是管理员
-            u = User.query.filter_by(email=email).first()
             if u and not u.is_admin:
                 u.is_admin = True
                 if password:
                     u.set_password(password)
                 db.session.commit()
-                print('[FreeYourPDF] 初始管理员：已将已有用户 %s 提升为管理员' % email, flush=True)
+                print('[FreeYourPDF] 初始管理员：已将已有用户（手机号 %s***）提升为管理员' % phone[:3], flush=True)
             return
-        # 当前没有任何管理员
-        u = User.query.filter_by(email=email).first()
         if u:
             u.is_admin = True
             if password:
                 u.set_password(password)
             db.session.commit()
-            print('[FreeYourPDF] 初始管理员：已将已有用户 %s 提升为管理员' % email, flush=True)
+            print('[FreeYourPDF] 初始管理员：已将已有用户（手机号 %s***）提升为管理员' % phone[:3], flush=True)
             return
         if not password:
             print('[FreeYourPDF] 初始管理员：未配置 INITIAL_ADMIN_PASSWORD，无法自动创建新管理员账号', flush=True)
             return
-        # 创建新管理员用户
-        base_username = username_cfg or (email.split('@')[0] if '@' in email else 'admin')
-        base_username = base_username[:32] or 'admin'
+        base_username = (username_cfg or 'admin')[:32] or 'admin'
         username = base_username
         n = 0
         while User.query.filter_by(username=username).first():
             n += 1
             username = (base_username + '_%d' % n)[:32]
-        new_user = User(email=email, username=username, is_admin=True)
+        virtual_email = 'phone_%s@admin.user' % phone
+        k = 0
+        while User.query.filter_by(email=virtual_email).first():
+            k += 1
+            virtual_email = 'phone_%s_%s@admin.user' % (phone, k)
+        new_user = User(
+            email=virtual_email,
+            username=username,
+            phone=phone,
+            password_set=True,
+            is_admin=True,
+        )
         new_user.set_password(password)
         db.session.add(new_user)
         db.session.flush()
@@ -125,7 +132,7 @@ with app.app_context():
         )
         db.session.add(quota)
         db.session.commit()
-        print('[FreeYourPDF] 初始管理员：已自动创建管理员账号 %s（用户名 %s）' % (email, new_user.username), flush=True)
+        print('[FreeYourPDF] 初始管理员：已自动创建管理员账号（手机号 %s***，用户名 %s）' % (phone[:3], new_user.username), flush=True)
 
     try:
         _ensure_initial_admin()

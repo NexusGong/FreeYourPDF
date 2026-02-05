@@ -19,7 +19,10 @@
   --text-muted: #a1a1aa;
   --primary: #7c3aed;
   --primary-hover: #8b5cf6;
+  /* 档位0：使用 logo-img 的发光效果（0 0 0 2px + 16px + 32px） */
   --primary-glow: rgba(124, 58, 237, 0.25);
+  --primary-glow-strong: rgba(124, 58, 237, 0.4);
+  --primary-glow-soft: rgba(124, 58, 237, 0.15);
   --radius: 4px;
   --radius-sm: 3px;
   /* 像素风字体：Zpix（覆盖中英日，正文 + 标题） */
@@ -37,21 +40,113 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+@keyframes bgScanline {
+  0% { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 50% -30%, 50% 110%; }
+  100% { background-position: 0 4px, 0 20px, 20px 0, 0 4px, 4px 0, 0 0, 50% -30%, 50% 110%; }
+}
+
+@keyframes bgGridMove {
+  0% { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 50% -30%, 50% 110%; }
+  100% { background-position: 20px 20px, 20px 20px, 0 0, 4px 4px, 4px 4px, 0 0, 50% -30%, 50% 110%; }
+}
+
+@keyframes bgGlowPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
 body {
   margin: 0;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
   font-family: var(--font);
   font-size: 17px;
   color: var(--text);
-  /* 使用纯色背景，避免过于花哨的网格影响可读性 */
-  background: var(--bg);
+  background-color: var(--bg);
   line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 8-bit 复古科技感动态背景：像素网格 + 大网格线 + 斜纹 + 顶部/底部光晕 + 扫描线 */
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 1px,
+      rgba(0, 0, 0, 0.15) 1px,
+      rgba(0, 0, 0, 0.15) 2px
+    ),
+    linear-gradient(180deg, transparent 0%, transparent 96%, rgba(124, 58, 237, 0.06) 96%, rgba(124, 58, 237, 0.06) 100%),
+    linear-gradient(90deg, transparent 0%, transparent 96%, rgba(124, 58, 237, 0.06) 96%, rgba(124, 58, 237, 0.06) 100%),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 3px,
+      rgba(124, 58, 237, 0.025) 3px,
+      rgba(124, 58, 237, 0.025) 4px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0px,
+      transparent 3px,
+      rgba(124, 58, 237, 0.025) 3px,
+      rgba(124, 58, 237, 0.025) 4px
+    ),
+    linear-gradient(135deg, transparent 0%, rgba(124, 58, 237, 0.04) 30%, transparent 60%, rgba(88, 28, 135, 0.03) 100%),
+    radial-gradient(ellipse 140% 70% at 50% -30%, rgba(124, 58, 237, 0.18) 0%, transparent 45%),
+    radial-gradient(ellipse 120% 50% at 50% 110%, rgba(124, 58, 237, 0.08) 0%, transparent 40%);
+  background-size:
+    100% 4px,
+    20px 20px,
+    20px 20px,
+    4px 4px,
+    4px 4px,
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  background-repeat: repeat, repeat, repeat, repeat, repeat, repeat, no-repeat, no-repeat;
+  animation: bgScanline 8s linear infinite, bgGridMove 20s linear infinite;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 80% 60% at 50% 50%, rgba(124, 58, 237, 0.08) 0%, transparent 60%);
+  animation: bgGlowPulse 4s ease-in-out infinite;
+  z-index: -1;
+}
+
+/* 发光档位：1 档更亮，2 档最亮，0 档初始 */
+body[data-glow-level="1"] {
+  --primary-glow: rgba(124, 58, 237, 0.42);
+  --primary-glow-strong: rgba(124, 58, 237, 0.6);
+  --primary-glow-soft: rgba(124, 58, 237, 0.28);
+}
+
+body[data-glow-level="2"] {
+  --primary-glow: rgba(124, 58, 237, 0.6);
+  --primary-glow-strong: rgba(124, 58, 237, 0.8);
+  --primary-glow-soft: rgba(124, 58, 237, 0.4);
 }
 
 .page {
+  width: 100%;
   max-width: 580px;
-  margin: 0 auto;
+  margin: auto;
   padding: var(--space-xl) var(--space-lg) 3rem;
+  flex: 0 1 auto;
 }
 
 /* Header */
@@ -73,7 +168,8 @@ body {
   /* 轻微描边 + 发光，兼顾像素感和现代感 */
   box-shadow:
     0 0 0 2px rgba(15, 23, 42, 0.8),
-    0 0 12px rgba(124, 58, 237, 0.65);
+    0 0 16px var(--primary-glow-strong),
+    0 0 32px var(--primary-glow);
 }
 
 .logo-text-wrap {
@@ -150,6 +246,56 @@ body {
   margin: 0;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* 发光档位按钮（小灯泡） */
+.glow-level-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
+  position: relative;
+}
+
+.glow-level-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 12px var(--primary-glow);
+}
+
+.glow-level-icon {
+  display: block;
+}
+
+.glow-level-dot {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.6;
+}
+
+body[data-glow-level="1"] .glow-level-dot { background: var(--primary); opacity: 0.9; box-shadow: 0 0 6px var(--primary); }
+body[data-glow-level="2"] .glow-level-dot { background: var(--primary); opacity: 1; box-shadow: 0 0 8px var(--primary), 0 0 12px var(--primary-glow); }
+
 .auth-area {
   display: flex;
   align-items: center;
@@ -214,13 +360,13 @@ body {
 .auth-user-trigger:hover {
   color: var(--text);
   border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 12px var(--primary-glow);
 }
 
 .auth-user-trigger[aria-expanded="true"] {
   color: var(--primary);
   border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 14px var(--primary-glow);
 }
 
 .auth-user-chevron {
@@ -238,7 +384,7 @@ body {
   background: var(--surface-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border), 0 0 20px var(--primary-glow-soft);
   z-index: 1000;
   opacity: 0;
   visibility: hidden;
@@ -328,6 +474,7 @@ body {
 .auth-tab.is-active {
   color: var(--text);
   background: var(--surface);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 12px var(--primary-glow-soft);
 }
 
 .auth-panel {
@@ -358,6 +505,7 @@ body {
 .auth-subtab.is-active {
   color: var(--primary);
   border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 10px var(--primary-glow);
 }
 
 .auth-form .modal-label,
@@ -407,6 +555,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.25rem;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.06), 0 0 20px var(--primary-glow-soft);
 }
 
 .tab {
@@ -435,7 +584,7 @@ body {
 .tab.is-active {
   color: var(--text);
   background: var(--surface-elevated);
-  box-shadow: inset 0 -2px 0 var(--primary);
+  box-shadow: inset 0 -2px 0 var(--primary), 0 0 0 1px var(--primary), 0 0 14px var(--primary-glow-soft);
 }
 
 /* Cards */
@@ -450,7 +599,11 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-md) var(--space-lg);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(124, 58, 237, 0.08), 0 0 24px var(--primary-glow-soft);
+  transition: box-shadow 0.2s;
+}
+.card:hover {
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(124, 58, 237, 0.15), 0 0 28px var(--primary-glow);
 }
 
 .card.is-dragover .drop-zone {
@@ -515,6 +668,7 @@ body {
   border-color: var(--primary);
   background: rgba(124, 58, 237, 0.06);
   color: var(--text);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 20px var(--primary-glow);
 }
 
 .drop-zone-icon {
@@ -809,11 +963,13 @@ body {
 
 .input:focus {
   border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 12px var(--primary-glow-soft);
 }
 
-/* 登录/注册弹窗内输入框不显示聚焦高亮 */
+/* 登录/注册弹窗内输入框聚焦时也带轻微发光 */
 #authModal .input:focus {
-  border-color: var(--border);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 10px var(--primary-glow-soft);
 }
 
 .btn {
@@ -866,20 +1022,24 @@ body {
   background: var(--primary);
   color: #fff;
   border-color: transparent;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.5), 0 0 16px var(--primary-glow-soft);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--primary-hover);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 20px var(--primary-glow);
 }
 
 /* 与加密/解锁主按钮颜色统一 */
 .btn-compress {
   background: var(--primary);
   color: #fff;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.5), 0 0 16px var(--primary-glow-soft);
 }
 
 .btn-compress:hover:not(:disabled) {
   background: var(--primary-hover);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 20px var(--primary-glow);
 }
 
 .hint {
@@ -1146,7 +1306,7 @@ body {
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(124, 58, 237, 0.12), 0 0 32px var(--primary-glow-soft);
 }
 
 .modal.encrypt-modal .modal-password {

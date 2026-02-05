@@ -62,10 +62,10 @@ USERNAME_MIN_LEN = 2
 USERNAME_MAX_LEN = 32
 
 # 初始管理员（首次启动时自动创建或提升为管理员，用于 Render 等线上环境）
-# 配置邮箱 + 密码：若该邮箱用户已存在则设密码并提升为管理员；不存在则自动创建管理员账号
-INITIAL_ADMIN_EMAIL = os.environ.get('INITIAL_ADMIN_EMAIL', '').strip()
+# 配置手机号 + 密码：若该手机号用户已存在则设密码并提升为管理员；不存在则自动创建管理员账号
+INITIAL_ADMIN_PHONE = os.environ.get('INITIAL_ADMIN_PHONE', '').strip().replace(' ', '').replace('-', '')
 INITIAL_ADMIN_PASSWORD = os.environ.get('INITIAL_ADMIN_PASSWORD', '').strip()
-# 新建管理员时的用户名（不填则用邮箱 @ 前一部分）
+# 新建管理员时的用户名（不填则用 admin）
 INITIAL_ADMIN_USERNAME = os.environ.get('INITIAL_ADMIN_USERNAME', '').strip()
 
 # 支付：三档套餐，每档含 加密/解锁/体积优化 次数 + 价格(元)
