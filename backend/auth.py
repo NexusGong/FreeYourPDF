@@ -23,7 +23,7 @@ def _user_to_dict(user):
         'is_admin': getattr(user, 'is_admin', False),
         'phone': getattr(user, 'phone', None),
         'password_set': getattr(user, 'password_set', False),
-        'created_at': user.created_at.isoformat() if getattr(user, 'created_at', None) else None,
+        'created_at': user.created_at.isoformat() + 'Z' if getattr(user, 'created_at', None) else None,
     }
 
 

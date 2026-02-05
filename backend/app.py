@@ -6,8 +6,11 @@ PDF 检测与解锁后端：仅提供 API，与前端分开启动；需配置 CO
 import io
 import os
 import sys
+import gc
+import resource
 from contextlib import redirect_stderr, redirect_stdout
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, Response, stream_with_context
+import json
 from pypdf import PdfReader, PdfWriter
 
 try:
@@ -219,6 +222,31 @@ class _suppress_pdf_warnings:
             self._cm_out.__exit__(exc_type, exc, tb)
         finally:
             self._null.close()
+
+
+def _check_memory_usage():
+    """
+    检查当前内存使用情况（仅 Linux/macOS）。
+    返回 (used_mb, limit_mb) 或 (None, None) 如果不支持。
+    """
+    try:
+        if sys.platform == 'linux' or sys.platform == 'darwin':
+            # 获取当前进程的内存使用（RSS，单位 KB）
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            used_mb = usage.ru_maxrss / 1024.0  # macOS 返回字节，Linux 返回 KB
+            if sys.platform == 'darwin':
+                used_mb = used_mb / 1024.0  # macOS 返回字节，需要再除以 1024
+            # Render 免费版通常有 512MB 内存限制
+            limit_mb = 400  # 设置 400MB 作为安全阈值
+            return used_mb, limit_mb
+    except Exception:
+        pass
+    return None, None
+
+
+def _cleanup_memory():
+    """强制垃圾回收，释放内存。"""
+    gc.collect()
 
 
 def _get_current_user_id(silent=False):
@@ -564,7 +592,7 @@ def api_me():
             'nickname': getattr(user, 'nickname', None) or user.username,
             'avatar': getattr(user, 'avatar', None),
             'is_admin': getattr(user, 'is_admin', False),
-            'created_at': user.created_at.isoformat() if user.created_at else None,
+            'created_at': user.created_at.isoformat() + 'Z' if user.created_at else None,
         }
     })
 
@@ -591,7 +619,7 @@ def api_user_profile_get():
         'password_set': getattr(user, 'password_set', False),
         'is_admin': getattr(user, 'is_admin', False),
         'quota': q,
-        'created_at': user.created_at.isoformat() if user.created_at else None,
+        'created_at': user.created_at.isoformat() + 'Z' if user.created_at else None,
     })
 
 
@@ -760,7 +788,7 @@ def api_payment_create():
             'transaction_id': payment.transaction_id,
             'remark': '订单号：' + payment.transaction_id,
         },
-        'created_at': payment.created_at.isoformat() if payment.created_at else None,
+        'created_at': payment.created_at.isoformat() + 'Z' if payment.created_at else None,
     })
 
 
@@ -901,8 +929,8 @@ def api_payment_orders():
                 'pack_type': p.pack_type,
                 'status': p.status,
                 'payment_method': p.payment_method,
-                'created_at': p.created_at.isoformat() if p.created_at else None,
-                'completed_at': p.completed_at.isoformat() if p.completed_at else None,
+                'created_at': p.created_at.isoformat() + 'Z' if p.created_at else None,
+                'completed_at': p.completed_at.isoformat() + 'Z' if p.completed_at else None,
             }
             for p in items
         ],
@@ -983,7 +1011,7 @@ def api_admin_users():
             'password_set': getattr(u, 'password_set', False),
             'is_admin': getattr(u, 'is_admin', False),
             'quota': _quota_dict(quota) if quota else None,
-            'created_at': u.created_at.isoformat() if u.created_at else None,
+            'created_at': u.created_at.isoformat() + 'Z' if u.created_at else None,
         })
     return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
 
@@ -1010,11 +1038,11 @@ def api_admin_user_detail(user_id):
                 'phone': getattr(user, 'phone', None),
                 'password_set': getattr(user, 'password_set', False),
                 'is_admin': getattr(user, 'is_admin', False),
-                'created_at': user.created_at.isoformat() if user.created_at else None,
+                'created_at': user.created_at.isoformat() + 'Z' if user.created_at else None,
             },
             'quota': _quota_dict(quota) if quota else None,
             'payments': [
-                {'id': p.id, 'pack_type': p.pack_type, 'amount': p.amount, 'quantity': p.quantity, 'status': p.status, 'created_at': (p.created_at.isoformat() if p.created_at else None)}
+                {'id': p.id, 'pack_type': p.pack_type, 'amount': p.amount, 'quantity': p.quantity, 'status': p.status, 'created_at': (p.created_at.isoformat() + 'Z' if p.created_at else None)}
                 for p in payments
             ],
         },
@@ -1056,6 +1084,20 @@ def api_admin_user_update(user_id):
         user.is_admin = bool(data['is_admin'])
     if 'password' in data and data['password']:
         user.set_password(data['password'])
+    if 'avatar' in data:
+        avatar = data.get('avatar')
+        if avatar is not None and isinstance(avatar, str) and avatar.startswith('data:image'):
+            # Base64 图片数据
+            try:
+                part = avatar.split(',')[1] if ',' in avatar else avatar
+                user.avatar = part
+            except Exception:
+                pass
+        elif avatar is not None and isinstance(avatar, str) and len(avatar) > 200:
+            # 长字符串可能是 Base64（无 data:image 前缀）
+            user.avatar = avatar
+        elif avatar is None or avatar == '':
+            user.avatar = None
     if 'encrypt_remaining' in data and data.get('encrypt_remaining') is not None:
         quota = Quota.query.filter_by(user_id=user_id).first()
         if quota:
@@ -1129,8 +1171,8 @@ def api_admin_payments():
             'quantity': p.quantity,
             'status': p.status,
             'transaction_id': p.transaction_id,
-            'created_at': p.created_at.isoformat() if p.created_at else None,
-            'completed_at': p.completed_at.isoformat() if p.completed_at else None,
+            'created_at': p.created_at.isoformat() + 'Z' if p.created_at else None,
+            'completed_at': p.completed_at.isoformat() + 'Z' if p.completed_at else None,
         })
     return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
 
@@ -1343,28 +1385,149 @@ def api_admin_payment_test():
 
 
 # ----- PDF 检测（不鉴权）-----
-# 常见密码 + 1～4 位数字，用于暴力破解
+# 常见密码列表，用于暴力破解（参考 pdfrip 项目）
 COMMON_PASSWORDS = [
-    '', '123456', 'password', '12345678', '1234', '12345', 'qwerty', '123456789',
-    '1234567', '111111', '000000', '123123', 'abc123', 'password1', 'admin', 'root',
-    'pdf', 'PDF', 'Pdf', 'pass', 'Pass', 'open', 'Open', 'secret', 'changeme'
+    '', '123', '1234', '12345', '123456', '1234567', '12345678', '123456789', '1234567890',
+    '0000', '00000', '000000', '1111', '11111', '111111', '123123',
+    'password', 'password1', 'password123', 'pass', 'pass123', '123pass', '123password',
+    'qwerty', 'abc123', 'admin', 'admin123', 'root', 'root123',
+    'pdf', 'PDF', 'Pdf', 'open', 'Open', 'secret', 'changeme'
 ]
 
 
-def _password_list():
+def _password_generator():
+    """
+    密码生成器，完全参考 pdfrip 项目的方法（使用生成器避免内存问题）：
+    1. 常见密码（字典攻击的基础）
+    2. 1-6 位数字（带前导零）- pdfrip 的 range 功能
+    3. 日期格式 DDMMYYYY（最近 10 年）- pdfrip 的 date bruteforce 功能
+    4. 字母数字组合（长度 3，a-zA-Z0-9）- pdfrip 的 default-query 功能（限制长度避免过多）
+    
+    注意：使用生成器模式，按需生成密码，避免一次性加载所有密码到内存。
+    完全参考 pdfrip 的密码生成策略。
+    """
+    from datetime import datetime
+    import calendar
+    import string
+    import itertools
     seen = set()
-    out = []
+    
+    # 1. 常见密码（字典攻击的基础）- pdfrip 的 wordlist 功能
     for p in COMMON_PASSWORDS:
         if p not in seen:
             seen.add(p)
-            out.append(p)
-    for length in range(1, 5):
+            yield p
+    
+    # 2. 1-6 位数字（带前导零）- pdfrip 的 range 功能
+    # pdfrip: range 1000 9999 可以指定数字范围
+    # 这里生成 1-6 位所有数字（带前导零）
+    for length in range(1, 7):
         for n in range(10 ** length):
             s = str(n).zfill(length)
             if s not in seen:
                 seen.add(s)
-                out.append(s)
-    return out
+                yield s
+    
+    # 3. 日期格式 DDMMYYYY（最近 10 年）- pdfrip 的 date bruteforce 功能
+    # pdfrip: date 1900 2000 可以指定年份范围
+    # 这里生成最近 10 年的所有日期（DDMMYYYY 格式）
+    current_year = datetime.now().year
+    for year in range(current_year - 10, current_year + 1):
+        for month in range(1, 13):
+            days_in_month = calendar.monthrange(year, month)[1]
+            for day in range(1, days_in_month + 1):
+                # DDMMYYYY 格式（pdfrip 默认格式）
+                date_str = f"{day:02d}{month:02d}{year}"
+                if date_str not in seen:
+                    seen.add(date_str)
+                    yield date_str
+                # MMDDYYYY 格式（另一种常见格式）
+                date_str2 = f"{month:02d}{day:02d}{year}"
+                if date_str2 not in seen:
+                    seen.add(date_str2)
+                    yield date_str2
+    
+    # 4. 字母数字组合（pdfrip 的 default-query 功能）
+    # pdfrip: default-query --max-length 8 --min-length 3
+    # 生成 a-zA-Z0-9 的组合
+    # 注意：长度 3 的组合有 62^3 = 238,328 种，已经很多了
+    # 为了平衡性能和覆盖率，只生成长度 3 的组合，并限制常见模式
+    chars = string.ascii_letters + string.digits  # a-zA-Z0-9
+    
+    # 长度 3 的组合（常见密码长度）
+    length = 3
+    max_attempts = 100000  # 最多尝试 10 万个
+    
+    # 优先尝试常见模式：
+    # 1. 全小写字母（常见）
+    count = 0
+    for combo in itertools.product(string.ascii_lowercase, repeat=length):
+        if count >= max_attempts:
+            break
+        pwd = ''.join(combo)
+        if pwd not in seen:
+            seen.add(pwd)
+            yield pwd
+            count += 1
+    
+    # 2. 全大写字母
+    count = 0
+    for combo in itertools.product(string.ascii_uppercase, repeat=length):
+        if count >= max_attempts:
+            break
+        pwd = ''.join(combo)
+        if pwd not in seen:
+            seen.add(pwd)
+            yield pwd
+            count += 1
+    
+    # 3. 数字 + 小写字母混合（常见模式：1位数字+2位字母，或2位字母+1位数字）
+    count = 0
+    # 1位数字 + 2位字母
+    for digit in string.digits:
+        for combo in itertools.product(string.ascii_lowercase, repeat=length-1):
+            if count >= max_attempts:
+                break
+            pwd = digit + ''.join(combo)
+            if pwd not in seen:
+                seen.add(pwd)
+                yield pwd
+                count += 1
+            # 字母 + 数字
+            pwd2 = ''.join(combo) + digit
+            if pwd2 not in seen:
+                seen.add(pwd2)
+                yield pwd2
+                count += 1
+        if count >= max_attempts:
+            break
+    
+    # 4. 2位数字 + 1位字母
+    count = 0
+    for digits in itertools.product(string.digits, repeat=2):
+        for letter in string.ascii_lowercase:
+            if count >= max_attempts:
+                break
+            pwd = ''.join(digits) + letter
+            if pwd not in seen:
+                seen.add(pwd)
+                yield pwd
+                count += 1
+            pwd2 = letter + ''.join(digits)
+            if pwd2 not in seen:
+                seen.add(pwd2)
+                yield pwd2
+                count += 1
+        if count >= max_attempts:
+            break
+
+
+def _password_list():
+    """
+    返回密码生成器（不转换为列表，避免内存问题）。
+    注意：直接返回生成器，使用时按需生成密码。
+    """
+    return _password_generator()
 
 
 def _can_open(stream, password=None):
@@ -1395,6 +1558,12 @@ def api_detect():
     if not f.filename or not f.filename.lower().endswith('.pdf'):
         return jsonify({'error': '请上传 PDF 文件'}), 400
     data = f.read()
+    
+    # 检查文件大小（防止内存耗尽）
+    file_size_mb = len(data) / (1024 * 1024)
+    if file_size_mb > config_module.MAX_FILE_SIZE_MB:
+        return jsonify({'error': f'文件过大（{file_size_mb:.1f}MB），最大支持 {config_module.MAX_FILE_SIZE_MB}MB'}), 400
+    
     stream = io.BytesIO(data)
     has_encrypt_meta = _has_encrypt_in_bytes(data)
     encrypted = True
@@ -1433,9 +1602,18 @@ def api_unlock():
         return jsonify({'error': '请上传 PDF 文件'}), 400
     password = _normalize_pdf_password(request.form.get('password') or '')
     data = f.read()
+    
+    # 检查文件大小（防止内存耗尽）
+    file_size_mb = len(data) / (1024 * 1024)
+    if file_size_mb > config_module.MAX_FILE_SIZE_MB:
+        return jsonify({'error': f'文件过大（{file_size_mb:.1f}MB），最大支持 {config_module.MAX_FILE_SIZE_MB}MB'}), 400
+    
     stream = io.BytesIO(data)
     try:
         reader = PdfReader(stream)
+        # 检查页数（防止超大文件）
+        if len(reader.pages) > config_module.MAX_PAGES_LIMIT:
+            return jsonify({'error': f'PDF 页数过多（{len(reader.pages)}页），最大支持 {config_module.MAX_PAGES_LIMIT} 页'}), 400
         if reader.is_encrypted:
             reader.decrypt(password)
         writer = PdfWriter()
@@ -1444,6 +1622,11 @@ def api_unlock():
         out = io.BytesIO()
         writer.write(out)
         out.seek(0)
+        
+        # 清理内存
+        del reader, writer
+        _cleanup_memory()
+        
         _record_usage(user_id, anonymous_id, 'unlock', '/api/unlock', 200)
         return send_file(
             out,
@@ -1587,9 +1770,18 @@ def api_encrypt():
     data = f.read()
     if not data:
         return jsonify({'error': '文件为空'}), 400
+    
+    # 检查文件大小（防止内存耗尽）
+    file_size_mb = len(data) / (1024 * 1024)
+    if file_size_mb > config_module.MAX_FILE_SIZE_MB:
+        return jsonify({'error': f'文件过大（{file_size_mb:.1f}MB），最大支持 {config_module.MAX_FILE_SIZE_MB}MB'}), 400
+    
     stream = io.BytesIO(data)
     try:
         reader = PdfReader(stream)
+        # 检查页数（防止超大文件）
+        if len(reader.pages) > config_module.MAX_PAGES_LIMIT:
+            return jsonify({'error': f'PDF 页数过多（{len(reader.pages)}页），最大支持 {config_module.MAX_PAGES_LIMIT} 页'}), 400
         if reader.is_encrypted:
             return jsonify({'error': '请先解锁已加密的 PDF 再使用加密功能'}), 400
         if len(reader.pages) == 0:
@@ -1618,6 +1810,10 @@ def api_encrypt():
             try:
                 stream_in = io.BytesIO(data)
                 pdf = pikepdf.Pdf.open(stream_in)
+                # 检查页数（防止超大文件）
+                if len(pdf.pages) > config_module.MAX_PAGES_LIMIT:
+                    pdf.close()
+                    return jsonify({'error': f'PDF 页数过多（{len(pdf.pages)}页），最大支持 {config_module.MAX_PAGES_LIMIT} 页'}), 400
                 out = io.BytesIO()
                 allow = None
                 if perms_json:
@@ -1637,6 +1833,11 @@ def api_encrypt():
                 pdf.save(out, encryption=enc)
                 pdf.close()
                 out.seek(0)
+                
+                # 清理内存
+                del pdf, stream_in
+                _cleanup_memory()
+                
                 print('[FreeYourPDF] 加密：pikepdf 加密成功', flush=True)
             except Exception as pikepdf_err:
                 print('[FreeYourPDF] 加密：pikepdf 失败，回退到 pypdf:', str(pikepdf_err), flush=True)
@@ -1649,6 +1850,9 @@ def api_encrypt():
             # 无权限限制且无密码：用 pypdf 做无加密或仅占位
             stream2 = io.BytesIO(data)
             reader = PdfReader(stream2)
+            # 检查页数（防止超大文件）
+            if len(reader.pages) > config_module.MAX_PAGES_LIMIT:
+                return jsonify({'error': f'PDF 页数过多（{len(reader.pages)}页），最大支持 {config_module.MAX_PAGES_LIMIT} 页'}), 400
             writer = PdfWriter()
             for page in reader.pages:
                 writer.add_page(page)
@@ -1662,9 +1866,11 @@ def api_encrypt():
             out = io.BytesIO()
             writer.write(out)
             out.seek(0)
-            pdf_bytes = out.getvalue()
-            if b'/Encrypt' not in pdf_bytes:
-                raise ValueError('加密未写入 PDF')
+            
+            # 清理内存（保留 out，因为需要返回）
+            del reader, writer, stream2
+            _cleanup_memory()
+            
         _record_usage(user_id, anonymous_id, 'encrypt', '/api/encrypt', 200)
         base_name = (f.filename or 'output.pdf').replace('.pdf', '')
         return send_file(
@@ -1698,10 +1904,19 @@ def api_compress():
     data = f.read()
     if not data:
         return jsonify({'error': '文件为空'}), 400
+    
+    # 检查文件大小（防止内存耗尽）
+    file_size_mb = len(data) / (1024 * 1024)
+    if file_size_mb > config_module.MAX_FILE_SIZE_MB:
+        return jsonify({'error': f'文件过大（{file_size_mb:.1f}MB），最大支持 {config_module.MAX_FILE_SIZE_MB}MB'}), 400
+    
     stream = io.BytesIO(data)
     try:
         with _suppress_pdf_warnings():
             reader = PdfReader(stream)
+            # 检查页数（防止超大文件）
+            if len(reader.pages) > config_module.MAX_PAGES_LIMIT:
+                return jsonify({'error': f'PDF 页数过多（{len(reader.pages)}页），最大支持 {config_module.MAX_PAGES_LIMIT} 页'}), 400
             if reader.is_encrypted:
                 return jsonify({'error': '请先解锁已加密的 PDF 再使用体积优化'}), 400
             if len(reader.pages) == 0:
@@ -1718,6 +1933,11 @@ def api_compress():
         # 1) 尝试用 Ghostscript 进行有损压缩（默认使用 /ebook：150dpi 左右，兼顾质量与体积）
         try:
             compressed_bytes = _compress_pdf_with_ghostscript(data, quality='/ebook')
+            
+            # 清理内存
+            del data, stream
+            _cleanup_memory()
+            
             print('[FreeYourPDF] 体积优化：Ghostscript 压缩成功', flush=True)
         except Exception as gs_err:
             print('[FreeYourPDF] 体积优化：Ghostscript 不可用或失败，回退到 pypdf 结构优化:', str(gs_err), flush=True)
@@ -1734,6 +1954,11 @@ def api_compress():
                 writer.write(out_buf)
                 out_buf.seek(0)
                 compressed_bytes = out_buf.getvalue()
+                
+                # 清理内存
+                del reader, writer, out_buf
+                _cleanup_memory()
+                
                 print('[FreeYourPDF] 体积优化：pypdf 结构优化完成，输出大小 %d 字节' % len(compressed_bytes), flush=True)
 
         _record_usage(user_id, anonymous_id, 'compress', '/api/compress', 200)
@@ -1755,62 +1980,172 @@ def api_compress():
 
 @app.route('/api/crack-and-unlock', methods=['POST'])
 def api_crack_and_unlock():
-    """暴力破解打开密码后解锁：登录或匿名，先扣 unlock 配额再处理。"""
+    """
+    暴力破解打开密码后解锁：登录或匿名，失败不扣次数，使用 SSE 推送进度。
+    参考 pdfrip 项目的暴力破解方法。
+    """
     user_id, anonymous_id = _quota_identity()
-    if user_id is not None:
-        ok, result = _consume_quota(user_id, 'unlock')
-    elif anonymous_id is not None:
-        ok, result = _consume_anonymous_quota(anonymous_id, 'unlock')
-    else:
+    if user_id is None and anonymous_id is None:
         return jsonify({'error': '请提供登录凭证或 X-Anonymous-Id'}), 401
-    if not ok:
-        return jsonify({'error': result}), 403
+    
+    # 先检查配额是否足够，但不扣减（失败时不扣次数）
+    if user_id is not None:
+        quota = Quota.query.filter_by(user_id=user_id).first()
+        if not quota or quota.unlock_remaining <= 0:
+            return jsonify({'error': '解锁次数不足'}), 403
+    else:
+        anon = _get_or_create_anonymous_quota(anonymous_id)
+        if anon.unlock_remaining <= 0:
+            return jsonify({'error': '解锁次数不足'}), 403
+    
     if 'file' not in request.files:
         return jsonify({'error': '未上传文件'}), 400
     f = request.files['file']
     if not f.filename or not f.filename.lower().endswith('.pdf'):
         return jsonify({'error': '请上传 PDF 文件'}), 400
     data = f.read()
+    
+    # 检查文件大小（防止内存耗尽）
+    file_size_mb = len(data) / (1024 * 1024)
+    if file_size_mb > config_module.MAX_FILE_SIZE_MB:
+        return jsonify({'error': f'文件过大（{file_size_mb:.1f}MB），最大支持 {config_module.MAX_FILE_SIZE_MB}MB'}), 400
+    
     stream = io.BytesIO(data)
-    passwords = _password_list()
-    last_err = None
-    for idx, pwd in enumerate(passwords):
-        stream.seek(0)
+    passwords = _password_list()  # 返回生成器，不转换为列表
+    
+    # 估算密码总数（用于进度显示，但不实际生成所有密码）
+    # 常见密码 + 1-6位数字 + 日期 + 字母数字组合（限制）
+    estimated_total = (
+        len(COMMON_PASSWORDS) +  # 常见密码
+        1111110 +  # 1-6位数字 (10 + 100 + 1000 + 10000 + 100000 + 1000000 - 1)
+        7300 +  # 日期格式（10年 * 365天 * 2种格式）
+        100000  # 字母数字组合（限制）
+    )
+    total = min(estimated_total, config_module.MAX_PASSWORD_ATTEMPTS)
+    
+    def generate():
+        """SSE 流式生成器，推送进度和结果。"""
+        last_err = None
+        
         try:
-            reader = PdfReader(stream)
-            if not reader.is_encrypted:
-                print('[FreeYourPDF] 暴力破解：PDF 未加密，无需破解', flush=True)
-                break
-            reader.decrypt(pwd)
-            if len(reader.pages) > 0:
-                print('[FreeYourPDF] 暴力破解：成功，密码为 "%s"（尝试 %d/%d）' % (pwd, idx + 1, len(passwords)), flush=True)
-                writer = PdfWriter()
-                for page in reader.pages:
-                    writer.add_page(page)
-                out = io.BytesIO()
-                writer.write(out)
-                out.seek(0)
-                _record_usage(user_id, anonymous_id, 'unlock', '/api/crack-and-unlock', 200)
-                return send_file(
-                    out,
-                    mimetype='application/pdf',
-                    as_attachment=True,
-                    download_name=(f.filename or 'output.pdf').replace('.pdf', '_unlocked.pdf')
-                )
+            # 发送开始消息
+            yield f"data: {json.dumps({'type': 'start', 'total': total, 'message': '开始暴力破解...'})}\n\n"
+            
+            idx = 0
+            for pwd in passwords:
+                # 限制最大尝试次数（防止内存耗尽）
+                if idx >= config_module.MAX_PASSWORD_ATTEMPTS:
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'已达到最大尝试次数（{config_module.MAX_PASSWORD_ATTEMPTS}），请尝试其他方式获取密码'})}\n\n"
+                    break
+                
+                # 每 1000 次尝试检查一次内存使用
+                if idx > 0 and idx % 1000 == 0:
+                    used_mb, limit_mb = _check_memory_usage()
+                    if used_mb and limit_mb and used_mb > limit_mb:
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'内存使用过高（{used_mb:.1f}MB），已停止破解'})}\n\n"
+                        break
+                    # 定期清理内存
+                    _cleanup_memory()
+                
+                stream.seek(0)
+                try:
+                    reader = PdfReader(stream)
+                    if not reader.is_encrypted:
+                        yield f"data: {json.dumps({'type': 'info', 'message': 'PDF 未加密，无需破解'})}\n\n"
+                        break
+                    
+                    # 检查页数（防止超大文件）
+                    try:
+                        page_count = len(reader.pages)
+                        if page_count > config_module.MAX_PAGES_LIMIT:
+                            yield f"data: {json.dumps({'type': 'error', 'message': f'PDF 页数过多（{page_count}页），最大支持 {config_module.MAX_PAGES_LIMIT} 页'})}\n\n"
+                            break
+                    except Exception:
+                        pass  # 如果无法读取页数，继续尝试
+                    
+                    # decrypt() 返回 True/False 表示是否成功，或 None（旧版本）
+                    decrypt_result = reader.decrypt(pwd)
+                    
+                    # 每 10 个密码或前 5 个发送一次进度
+                    if idx < 5 or idx % 10 == 0:
+                        progress = min(99, int((idx + 1) * 100 / total))  # 最多显示 99%
+                        yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total, 'progress': progress, 'password': pwd if idx < 5 else None})}\n\n"
+                    
+                    idx += 1
+                    
+                    # 验证解密是否成功：检查返回值
+                    if decrypt_result is False:
+                        continue
+                    
+                    # 双重验证：尝试访问页面来验证解密是否真的成功
+                    try:
+                        # 尝试访问页面数量（这可能会抛出异常如果解密未成功）
+                        page_count = len(reader.pages)
+                        if page_count == 0:
+                            continue
+                        # 尝试访问第一页内容来验证解密是否真的成功
+                        test_page = reader.pages[0]
+                        # 如果能访问页面，说明解密成功
+                        print('[FreeYourPDF] 暴力破解成功：密码 "%s"（尝试 %d/%d）' % (pwd, idx + 1, total), flush=True)
+                        
+                        # 生成解锁后的 PDF
+                        writer = PdfWriter()
+                        for page in reader.pages:
+                            writer.add_page(page)
+                        out = io.BytesIO()
+                        writer.write(out)
+                        out.seek(0)
+                        result_pdf = out.getvalue()
+                        result_filename = (f.filename or 'output.pdf').replace('.pdf', '_unlocked.pdf')
+                        
+                        # 清理内存
+                        del reader, writer, out
+                        _cleanup_memory()
+                        
+                        # 成功时扣减配额
+                        if user_id is not None:
+                            _consume_quota(user_id, 'unlock')
+                        else:
+                            _consume_anonymous_quota(anonymous_id, 'unlock')
+                        _record_usage(user_id, anonymous_id, 'unlock', '/api/crack-and-unlock', 200)
+                        
+                        # 发送成功消息（包含 PDF 数据）
+                        import base64
+                        pdf_b64 = base64.b64encode(result_pdf).decode('utf-8')
+                        yield f"data: {json.dumps({'type': 'success', 'password': pwd, 'attempts': idx + 1, 'total': total, 'pdf': pdf_b64, 'filename': result_filename})}\n\n"
+                        return
+                        
+                    except Exception as page_err:
+                        # 解密返回成功但访问页面失败，可能是密码错误或加密算法不支持
+                        last_err = page_err
+                        continue
+                        
+                except Exception as e:
+                    last_err = e
+                    continue
+            
+            # 所有密码都尝试完毕，未成功
+            err_msg = '未能破解密码（已尝试 %d 个密码）' % idx
+            print('[FreeYourPDF] 暴力破解失败：%s' % err_msg, flush=True)
+            sys.stdout.flush()
+            
+            # 失败不扣次数，发送失败消息
+            yield f"data: {json.dumps({'type': 'error', 'message': err_msg, 'attempts': idx})}\n\n"
+            
         except Exception as e:
-            last_err = e
-            if idx < 5 or idx % 10 == 0:
-                print('[FreeYourPDF] 暴力破解：尝试密码 "%s" 失败: %s' % (pwd, str(e)), flush=True)
-            continue
-    err_msg = '未能破解密码（已尝试 %d 个密码）' % len(passwords)
-    if last_err:
-        print('[FreeYourPDF] 暴力破解失败:', err_msg, '最后错误:', str(last_err), flush=True)
-        import traceback
-        traceback.print_exc(file=sys.stdout)
-    else:
-        print('[FreeYourPDF] 暴力破解失败:', err_msg, flush=True)
-    sys.stdout.flush()
-    return jsonify({'error': err_msg}), 400
+            err_msg = '暴力破解过程出错：' + str(e)
+            print('[FreeYourPDF] 暴力破解失败：%s' % err_msg, flush=True)
+            sys.stdout.flush()
+            yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
+    
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'  # 禁用 nginx 缓冲
+        }
+    )
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

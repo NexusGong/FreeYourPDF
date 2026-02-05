@@ -29,6 +29,11 @@ elif not SQLITE_PATH.startswith('sqlite:'):
 # Flask
 MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
 
+# 内存限制（Render 免费版通常有 512MB 内存）
+MAX_FILE_SIZE_MB = 30  # 最大文件大小 30MB（留出处理空间）
+MAX_PASSWORD_ATTEMPTS = 50000  # 暴力破解最大尝试次数（防止内存耗尽）
+MAX_PAGES_LIMIT = 1000  # PDF 最大页数限制（防止超大文件）
+
 # JWT
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DAYS = 7

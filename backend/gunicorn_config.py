@@ -28,3 +28,8 @@ class CustomGunicornLogger(glogging.Logger):
 
 # 使用自定义 logger，其它保持默认
 logger_class = CustomGunicornLogger
+
+# 超时设置：暴力破解可能需要较长时间，设置为 5 分钟（300 秒）
+# Render 默认超时是 30 秒，这里增加到 300 秒以支持暴力破解
+timeout = 300
+keepalive = 5

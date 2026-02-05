@@ -7,14 +7,16 @@
   <link rel="icon" href="assets/logo-freeyourpdf.png">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>FreeYourPDF - PDF 加密 / 解锁 / 体积优化</title>
+  <title>FreeYourPDF - PDF 加密 / 解锁 / 优化</title>
   <link rel="stylesheet" href="css/style.css?v=3">
-  <!-- 本地开发走 http://localhost:5001，线上部署走同源（空字符串表示与当前域名同源） -->
+  <!-- 本地开发走 http://localhost:5001，局域网访问时使用相同IP的5001端口，线上部署走同源（空字符串表示与当前域名同源） -->
   <script>
     window.FREEYOURPDF_API_BASE =
       (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
         ? 'http://localhost:5001'
-        : '';
+        : (location.hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./))
+          ? 'http://' + location.hostname + ':5001'
+          : '';
   </script>
 </head>
 <body>
@@ -26,7 +28,7 @@
           <img src="assets/logo-freeyourpdf.png" alt="FreeYourPDF 标志" class="logo-img">
           <div class="logo-text-wrap">
             <h1 class="logo"><span class="logo-text">FreeYourPDF</span></h1>
-            <p class="tagline">PDF 加密 · 解锁 · 体积优化</p>
+            <p class="tagline">PDF 加密 · 解锁 · 优化</p>
           </div>
         </div>
         <div class="header-right">
@@ -64,18 +66,18 @@
       <nav class="tabs" id="mainTabs" role="tablist">
         <button type="button" class="tab is-active" id="tabEncrypt" role="tab" aria-selected="true" data-tab="encrypt">
           加密
-          <span class="usage-value" id="usageValueEncrypt">5</span>
-          <span class="usage-total" id="usageTotalEncrypt">/ 5</span>
+          <span class="usage-value" id="usageValueEncrypt">10</span>
+          <span class="usage-total" id="usageTotalEncrypt">/ 10</span>
         </button>
         <button type="button" class="tab" id="tabUnlock" role="tab" aria-selected="false" data-tab="unlock">
           解锁
-          <span class="usage-value" id="usageValueUnlock">5</span>
-          <span class="usage-total" id="usageTotalUnlock">/ 5</span>
+          <span class="usage-value" id="usageValueUnlock">10</span>
+          <span class="usage-total" id="usageTotalUnlock">/ 10</span>
         </button>
         <button type="button" class="tab" id="tabCompress" role="tab" aria-selected="false" data-tab="compress">
-          体积优化
-          <span class="usage-value" id="usageValueCompress">5</span>
-          <span class="usage-total" id="usageTotalCompress">/ 5</span>
+          优化
+          <span class="usage-value" id="usageValueCompress">10</span>
+          <span class="usage-total" id="usageTotalCompress">/ 10</span>
         </button>
       </nav>
 
@@ -231,7 +233,7 @@
             <span class="profile-usage-total" id="profileQuotaUnlockTotal">/ —</span>
           </div>
           <div class="profile-usage-item">
-            <span class="profile-usage-label">体积优化</span>
+            <span class="profile-usage-label">优化</span>
             <span class="profile-usage-value" id="profileQuotaCompress">—</span>
             <span class="profile-usage-total" id="profileQuotaCompressTotal">/ —</span>
           </div>
@@ -351,8 +353,57 @@
       <div class="admin-panel" id="adminPanelUsers" data-admin-panel="users" style="display:none;">
         <h2 class="admin-section-title">用户管理</h2>
         <div class="admin-search"><input type="text" id="adminUserSearch" class="input" placeholder="搜索用户名/邮箱/手机号"><button type="button" class="btn btn-secondary btn-sm" id="adminUserSearchBtn">搜索</button></div>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>手机号</th><th>已设密码</th><th>加密</th><th>解锁</th><th>体积</th><th>注册时间</th></tr></thead><tbody id="adminUsersBody"></tbody></table></div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>手机号</th><th>已设密码</th><th>加密</th><th>解锁</th><th>体积</th><th>注册时间</th><th>操作</th></tr></thead><tbody id="adminUsersBody"></tbody></table></div>
         <p class="admin-pager" id="adminUsersPager"></p>
+      </div>
+      
+      <!-- 编辑用户弹窗 -->
+      <div class="modal-overlay" id="adminUserEditModal" aria-hidden="true">
+        <div class="modal">
+          <h3 class="modal-title">编辑用户</h3>
+          <div class="modal-section">
+            <label class="modal-section-label">用户名</label>
+            <input type="text" id="adminUserEditUsername" class="input" placeholder="用户名">
+          </div>
+          <div class="modal-section">
+            <label class="modal-section-label">邮箱</label>
+            <input type="email" id="adminUserEditEmail" class="input" placeholder="邮箱">
+          </div>
+          <div class="modal-section">
+            <label class="modal-section-label">昵称</label>
+            <input type="text" id="adminUserEditNickname" class="input" placeholder="昵称（可选）">
+          </div>
+          <div class="modal-section">
+            <label class="modal-section-label">手机号</label>
+            <input type="text" id="adminUserEditPhone" class="input" placeholder="手机号（可选）">
+          </div>
+          <div class="modal-section">
+            <label class="modal-section-label">新密码</label>
+            <input type="password" id="adminUserEditPassword" class="input" placeholder="留空则不修改密码">
+          </div>
+          <div class="modal-section">
+            <label class="modal-section-label">
+              <input type="checkbox" id="adminUserEditIsAdmin"> 管理员权限
+            </label>
+          </div>
+          <div class="modal-section">
+            <label class="modal-section-label">加密次数</label>
+            <input type="number" id="adminUserEditEncrypt" class="input" placeholder="加密次数">
+          </div>
+          <div class="modal-section">
+            <label class="modal-section-label">解锁次数</label>
+            <input type="number" id="adminUserEditUnlock" class="input" placeholder="解锁次数">
+          </div>
+          <div class="modal-section">
+            <label class="modal-section-label">体积优化次数</label>
+            <input type="number" id="adminUserEditCompress" class="input" placeholder="体积优化次数">
+          </div>
+          <p class="modal-hint modal-hint-error" id="adminUserEditHint" aria-hidden="true"></p>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="adminUserEditCancel">取消</button>
+            <button type="button" class="btn btn-primary" id="adminUserEditSubmit">保存</button>
+          </div>
+        </div>
       </div>
       <div class="admin-panel" id="adminPanelUsage" data-admin-panel="usage" style="display:none;">
         <h2 class="admin-section-title">使用记录</h2>
@@ -443,7 +494,7 @@
   <!-- 体积优化弹窗：结构与加密弹窗一致 -->
   <div class="modal-overlay" id="compressModal" aria-hidden="true">
     <div class="modal compress-modal">
-      <h3 class="modal-title">体积优化</h3>
+      <h3 class="modal-title">优化</h3>
       <p class="modal-desc">由服务端统一进行智能压缩，点击「开始体积优化」后进行处理，成功后可下载。</p>
       <div class="modal-section">
         <span class="modal-section-label">减少文件大小</span>
@@ -462,8 +513,25 @@
   <div class="modal-overlay" id="decryptModal" aria-hidden="true">
     <div class="modal decrypt-modal">
       <h3 class="modal-title">解密（需打开密码）</h3>
-      <p class="modal-desc">将尝试<strong>暴力破解</strong>打开密码（常见密码、1～4 位数字等）。</p>
-      <p class="modal-desc modal-desc-warn">破解可能<strong>耗时较长</strong>，且<strong>有一定概率无法破解</strong>；若密码较复杂，建议通过其他方式获取密码后再解密。</p>
+      
+      <div class="modal-desc-section">
+        <p class="modal-desc"><strong>暴力破解适用范围：</strong></p>
+        <ul class="modal-desc-list">
+          <li>常见弱密码（如 123456、password 等）</li>
+          <li>简单数字密码（1～6 位数字，如 1234、000000）</li>
+          <li>日期格式密码（如 01012024、20240101）</li>
+          <li>短字母数字组合（3 位以内，如 abc、a1b）</li>
+        </ul>
+      </div>
+      
+      <div class="modal-desc-section">
+        <p class="modal-desc modal-desc-warn">
+          <strong>⚠️ 重要提示：</strong><br>
+          暴力破解通过<strong>逐一尝试</strong>密码组合来破解，仅适用于<strong>简单密码</strong>。<br>
+          <strong>复杂密码（长密码、特殊字符、随机组合）无法破解</strong>，系统会尝试数万个常见组合后停止。<br>
+          若密码较复杂或包含特殊字符，建议通过其他方式获取密码后再解密。
+        </p>
+      </div>
 
       <div class="modal-section">
         <button type="button" class="btn btn-primary btn-block" id="decryptModalCrack">开始暴力破解</button>
@@ -476,13 +544,18 @@
     </div>
   </div>
 
-  <!-- 解密/破解进度条弹出层（只显示进度条与百分比） -->
+  <!-- 解密/破解进度条弹出层（显示进度条、百分比和提示信息） -->
   <div class="loading-overlay loading-overlay-progress" id="decryptProgressOverlay" aria-hidden="true">
     <div class="progress-card progress-card-decrypt">
+      <p class="progress-text" id="decryptProgressText">暴力破解中...</p>
       <div class="progress-bar-wrap">
         <div class="progress-bar" id="decryptProgressBar" style="width: 0%"></div>
       </div>
       <p class="progress-percent" id="decryptProgressPercent">0%</p>
+      <p class="progress-hint" id="decryptProgressHint">提示：暴力破解仅适用于简单密码，复杂密码可能无法破解</p>
+      <div class="progress-actions">
+        <button type="button" class="btn btn-secondary btn-sm" id="decryptProgressCancel">取消</button>
+      </div>
     </div>
   </div>
 

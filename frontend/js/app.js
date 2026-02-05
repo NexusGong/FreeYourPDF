@@ -54,6 +54,49 @@
     return s;
   }
 
+  /**
+   * 将 ISO 时间字符串转换为用户本地时区的格式化时间
+   * @param {string} isoString - ISO 格式时间字符串（如 "2024-01-01T12:00:00" 或 "2024-01-01T12:00:00Z"）
+   * @param {boolean} includeSeconds - 是否包含秒数，默认 true
+   * @returns {string} 格式化后的本地时间字符串（如 "2024-01-01 20:00:00"）
+   */
+  function formatLocalTime(isoString, includeSeconds) {
+    if (!isoString || isoString === '-') return '-';
+    if (includeSeconds === undefined) includeSeconds = true;
+    
+    try {
+      // 处理 ISO 格式：如果末尾没有 Z，添加 Z 表示 UTC
+      var dateStr = isoString;
+      if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+        // 如果没有时区信息，假设是 UTC
+        if (dateStr.includes('T')) {
+          dateStr = dateStr + 'Z';
+        }
+      }
+      
+      var date = new Date(dateStr);
+      if (isNaN(date.getTime())) {
+        return isoString; // 如果解析失败，返回原字符串
+      }
+      
+      var year = date.getFullYear();
+      var month = String(date.getMonth() + 1).padStart(2, '0');
+      var day = String(date.getDate()).padStart(2, '0');
+      var hours = String(date.getHours()).padStart(2, '0');
+      var minutes = String(date.getMinutes()).padStart(2, '0');
+      var seconds = String(date.getSeconds()).padStart(2, '0');
+      
+      if (includeSeconds) {
+        return year + '-' + month + '-' + day + ' ' + hours + ':' + minutes + ':' + seconds;
+      } else {
+        return year + '-' + month + '-' + day + ' ' + hours + ':' + minutes;
+      }
+    } catch (e) {
+      console.error('时间格式化失败:', e, isoString);
+      return isoString; // 出错时返回原字符串
+    }
+  }
+
   async function fetchWithAuth(url, opts) {
     var token = getToken();
     opts = opts || {};
@@ -105,7 +148,7 @@
 
   function updateUsageUI() {
     var q = stateQuota;
-    var total = getToken() ? 10 : 5;
+    var total = getToken() ? 20 : 10;
     var defaultRem = total;
     var remEncrypt = q && q.encrypt != null ? Math.max(0, q.encrypt) : defaultRem;
     var remUnlock = q && q.unlock != null ? Math.max(0, q.unlock) : defaultRem;
@@ -119,9 +162,10 @@
     if (elEncrypt) elEncrypt.textContent = String(remEncrypt);
     if (elUnlock) elUnlock.textContent = String(remUnlock);
     if (elCompress) elCompress.textContent = String(remCompress);
-    if (totalEncrypt) totalEncrypt.textContent = '/ ' + Math.max(remEncrypt, total);
-    if (totalUnlock) totalUnlock.textContent = '/ ' + Math.max(remUnlock, total);
-    if (totalCompress) totalCompress.textContent = '/ ' + Math.max(remCompress, total);
+    // 总数始终显示为固定的默认值（登录20次，匿名10次），而不是动态的剩余次数
+    if (totalEncrypt) totalEncrypt.textContent = '/ ' + total;
+    if (totalUnlock) totalUnlock.textContent = '/ ' + total;
+    if (totalCompress) totalCompress.textContent = '/ ' + total;
     var extra = document.getElementById('extraSection');
     var anyExhausted = (remEncrypt <= 0 || remUnlock <= 0 || remCompress <= 0);
     if (extra) extra.setAttribute('aria-hidden', anyExhausted ? 'false' : 'true');
@@ -129,7 +173,7 @@
 
   function getRemaining(type) {
     var q = stateQuota;
-    var total = getToken() ? 10 : 5;
+    var total = getToken() ? 20 : 10;
     if (type === 'encrypt') return (q && q.encrypt != null) ? Math.max(0, q.encrypt) : total;
     if (type === 'unlock') return (q && q.unlock != null) ? Math.max(0, q.unlock) : total;
     if (type === 'compress') return (q && q.compress != null) ? Math.max(0, q.compress) : total;
@@ -553,7 +597,7 @@
     var titleEl = document.getElementById('cardTitle');
     var descEl = document.getElementById('cardDesc');
     var t = state.currentTab;
-    var titles = { encrypt: '选择 PDF 文件（加密）', unlock: '选择 PDF 文件（解锁）', compress: '选择 PDF 文件（体积优化）' };
+    var titles = { encrypt: '选择 PDF 文件（加密）', unlock: '选择 PDF 文件（解锁）', compress: '选择 PDF 文件（优化）' };
     var intros = {
       encrypt: '支持多选，可对未加密的 PDF 进行加密。',
       unlock: '支持多选，可对需密码或有权限限制的 PDF 进行解锁（系统破解或解除限制）。',
@@ -671,7 +715,7 @@
 
     var compressBlock =
       '<div class="file-row-block file-row-block-compress">' +
-        '<span class="file-row-block-label">体积优化</span>' +
+        '<span class="file-row-block-label">优化</span>' +
         (canShowActions
           ? '<div class="file-row-block-inner">' +
               (!hasCompressResult
@@ -823,12 +867,16 @@
     var overlay = document.getElementById('decryptProgressOverlay');
     var bar = document.getElementById('decryptProgressBar');
     var percentEl = document.getElementById('decryptProgressPercent');
+    var textEl = document.getElementById('decryptProgressText');
     if (overlay) {
       overlay.setAttribute('aria-hidden', show ? 'false' : 'true');
       overlay.classList.toggle('is-visible', !!show);
     }
     if (bar) bar.style.width = (percent == null ? 0 : percent) + '%';
     if (percentEl) percentEl.textContent = (percent == null ? 0 : Math.round(percent)) + '%';
+    if (textEl && !show) {
+      textEl.textContent = '暴力破解中...';
+    }
   }
 
   function onActionClick(e) {
@@ -897,8 +945,27 @@
     }
   }
 
+  // 保存当前破解任务的 reader，用于取消操作
+  var currentCrackReader = null;
+  var currentCrackCancelled = false;
+
   /**
-   * 解密：进入此弹窗时已是「需打开密码」，统一走后端 /api/crack-and-unlock（需登录或匿名，后端扣配额），不再在前端暴力破解。
+   * 取消暴力破解
+   */
+  function cancelCrack() {
+    if (currentCrackReader) {
+      currentCrackCancelled = true;
+      currentCrackReader.cancel().catch(function(err) {
+        console.log('取消读取流:', err);
+      });
+      currentCrackReader = null;
+    }
+    showDecryptProgress(false);
+    showGlobalHint('已取消暴力破解（失败不扣次数）', false);
+  }
+
+  /**
+   * 解密：进入此弹窗时已是「需打开密码」，统一走后端 /api/crack-and-unlock（需登录或匿名，失败不扣次数），使用 SSE 推送进度。
    */
   async function onDecryptModalCrack() {
     var index = pendingDecryptIndex;
@@ -912,34 +979,145 @@
     }
     closeDecryptModal();
     showGlobalHint('');
-    showDecryptProgress(true, 30);
+    showDecryptProgress(true, 0);
+    currentCrackCancelled = false;
+    currentCrackReader = null;
+    
+    // 更新进度文本
+    var progressTextEl = document.getElementById('decryptProgressText');
+    if (progressTextEl) progressTextEl.textContent = '暴力破解中...';
+    
     try {
       var formCrack = new FormData();
       formCrack.append('file', item.file);
-      var resCrack = await fetchWithAuth(API_BASE + '/api/crack-and-unlock', { method: 'POST', body: formCrack });
-      if (resCrack.ok) {
-        var blobCrack = await resCrack.blob();
-        var nameCrack = (resCrack.headers.get('Content-Disposition') || '').match(/filename="?([^";]+)"?/);
-        var outNameCrack = (nameCrack && nameCrack[1]) ? decodeURIComponent(nameCrack[1]) : (nameWithoutExt(item.name) + '_unlocked.pdf');
+      
+      // 使用 fetch + ReadableStream 接收 SSE 流（EventSource 不支持 POST）
+      var response = await fetchWithAuth(API_BASE + '/api/crack-and-unlock', {
+        method: 'POST',
+        body: formCrack
+      });
+      
+      if (!response.ok) {
+        var errJson = await response.json().catch(function () { return {}; });
         showDecryptProgress(false);
-        item.resultProtection = { blob: blobCrack, name: outNameCrack };
-        await loadQuota();
-        renderFileList();
-        showGlobalHint('已破解并解密，请点击「下载」保存。');
+        if (response.status === 403) {
+          await loadQuota();
+          showGlobalHint(errJson.error || '解锁次数不足。', true);
+          return;
+        }
+        showGlobalHint(errJson.error || '请求失败。', true);
         return;
       }
-      var errJson = await resCrack.json().catch(function () { return {}; });
-      showDecryptProgress(false);
-      if (resCrack.status === 403) {
-        await loadQuota();
-        showGlobalHint(errJson.error || '解锁次数不足。', true);
+      
+      // 读取 SSE 流
+      var reader = response.body.getReader();
+      currentCrackReader = reader;
+      var decoder = new TextDecoder();
+      var buffer = '';
+      var success = false;
+      
+      while (true) {
+        // 检查是否已取消
+        if (currentCrackCancelled) {
+          reader.cancel().catch(function() {});
+          break;
+        }
+        
+        var { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // 保留最后不完整的行
+        
+        for (var line of lines) {
+          // 再次检查是否已取消
+          if (currentCrackCancelled) {
+            break;
+          }
+          
+          if (line.startsWith('data: ')) {
+            try {
+              var data = JSON.parse(line.substring(6));
+              
+              if (data.type === 'start') {
+                if (progressTextEl) progressTextEl.textContent = '开始暴力破解...';
+                showDecryptProgress(true, 0);
+              } else if (data.type === 'progress') {
+                var progress = data.progress || 0;
+                var current = data.current || 0;
+                var total = data.total || 0;
+                var password = data.password;
+                
+                var text = '暴力破解中... (' + current + '/' + total + ')';
+                if (password && current <= 5) {
+                  text += ' 尝试密码: ' + password;
+                }
+                if (progressTextEl) progressTextEl.textContent = text;
+                showDecryptProgress(true, progress);
+              } else if (data.type === 'success') {
+                success = true;
+                var password = data.password || '';
+                var attempts = data.attempts || 0;
+                var pdfB64 = data.pdf;
+                var filename = data.filename || (nameWithoutExt(item.name) + '_unlocked.pdf');
+                
+                if (progressTextEl) progressTextEl.textContent = '破解成功！密码: ' + password + ' (尝试 ' + attempts + ' 次)';
+                showDecryptProgress(true, 100);
+                
+                // 将 base64 转换为 blob
+                var binaryString = atob(pdfB64);
+                var bytes = new Uint8Array(binaryString.length);
+                for (var i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+                var blobCrack = new Blob([bytes], { type: 'application/pdf' });
+                
+                showDecryptProgress(false);
+                currentCrackReader = null;
+                item.resultProtection = { blob: blobCrack, name: filename };
+                await loadQuota();
+                renderFileList();
+                showGlobalHint('已破解并解密，密码为 "' + password + '"，请点击「下载」保存。');
+                return;
+              } else if (data.type === 'error') {
+                showDecryptProgress(false);
+                currentCrackReader = null;
+                var errMsg = data.message || '未能破解密码';
+                showGlobalHint(errMsg + '（失败不扣次数）', true);
+                await loadQuota(); // 刷新配额显示
+                return;
+              } else if (data.type === 'info') {
+                if (progressTextEl) progressTextEl.textContent = data.message || '处理中...';
+              }
+            } catch (e) {
+              console.error('解析 SSE 数据失败:', e, line);
+            }
+          }
+        }
+      }
+      
+      // 清理 reader 引用
+      currentCrackReader = null;
+      
+      if (currentCrackCancelled) {
+        // 已取消，不显示错误消息
         return;
       }
-      showGlobalHint(errJson.error || '未能破解密码。', true);
+      
+      if (!success) {
+        showDecryptProgress(false);
+        showGlobalHint('未能破解密码（失败不扣次数）', true);
+        await loadQuota();
+      }
     } catch (err) {
+      currentCrackReader = null;
       showDecryptProgress(false);
-      console.error(err);
-      showGlobalHint('未能破解密码：' + (err && err.message ? err.message : '网络或服务器错误'), true);
+      if (!currentCrackCancelled) {
+        console.error(err);
+        showGlobalHint('暴力破解失败：' + (err && err.message ? err.message : '网络或服务器错误') + '（失败不扣次数）', true);
+        await loadQuota();
+      }
     }
   }
 
@@ -1015,12 +1193,73 @@
     if (!item || (type !== 'protection' && type !== 'compress')) return;
     const result = type === 'protection' ? item.resultProtection : item.resultCompress;
     if (!result || !result.blob) return;
-    const url = URL.createObjectURL(result.blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = result.name || 'output.pdf';
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    
+    // 检测是否为移动设备（特别是iOS）
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const filename = result.name || 'output.pdf';
+    
+    if (isMobile) {
+      // 移动端：使用更可靠的方式下载
+      // iOS Safari 不支持 download 属性，需要特殊处理
+      if (isIOS) {
+        // iOS: 创建一个临时的 blob URL，然后通过新窗口打开
+        // 注意：iOS Safari 会直接打开PDF而不是下载，所以需要提示用户
+        const url = URL.createObjectURL(result.blob);
+        
+        // 尝试使用 a 标签打开，但设置 target="_blank" 让用户可以选择保存
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        // 即使iOS不支持download，也设置它，某些情况下可能有用
+        a.download = filename;
+        // 设置样式使其不可见
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        // 延迟提示，让浏览器有时间处理
+        setTimeout(function () {
+          var passwordHint = '';
+          if (type === 'protection' && item.resultProtection) {
+            // 尝试从加密弹窗获取密码（如果还在内存中）
+            var pwdEl = document.getElementById('encryptPassword');
+            var requirePwdEl = document.getElementById('encRequirePassword');
+            if (pwdEl && requirePwdEl && requirePwdEl.checked && pwdEl.value) {
+              passwordHint = ' 密码：' + pwdEl.value;
+            }
+          }
+          showGlobalHint('PDF已在新窗口打开。请点击右上角「分享」按钮，选择「存储到文件」或「保存到文件」来保存PDF。' + (type === 'protection' ? '（加密文件需要密码才能打开' + passwordHint + '）' : ''));
+          URL.revokeObjectURL(url);
+        }, 300);
+      } else {
+        // Android: 尝试使用 download 属性
+        const url = URL.createObjectURL(result.blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () {
+          URL.revokeObjectURL(url);
+        }, 2000);
+      }
+    } else {
+      // 桌面端：使用标准的 download 属性
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    }
   }
 
   function showEncryptProgress(show, percent, text) {
@@ -1105,7 +1344,12 @@
 
       setTimeout(function () {
         showEncryptProgress(false);
-        showGlobalHint('加密完成，请点击「下载」保存。用您设置的密码即可在各类 PDF 阅读器中打开。');
+        var passwordHint = userPwd ? '（密码：' + userPwd + '）' : '';
+        var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        var downloadHint = isMobile 
+          ? '加密完成！请点击「下载」按钮保存文件。' + (userPwd ? '保存后打开PDF时需要输入密码：' + userPwd : '')
+          : '加密完成，请点击「下载」保存。用您设置的密码即可在各类 PDF 阅读器中打开。' + passwordHint;
+        showGlobalHint(downloadHint);
       }, 500);
     } catch (e) {
       console.error(e);
@@ -1394,8 +1638,10 @@
   var decryptModalEl = document.getElementById('decryptModal');
   var decryptModalCancel = document.getElementById('decryptModalCancel');
   var decryptModalCrack = document.getElementById('decryptModalCrack');
+  var decryptProgressCancel = document.getElementById('decryptProgressCancel');
   if (decryptModalCancel) decryptModalCancel.addEventListener('click', closeDecryptModal);
   if (decryptModalCrack) decryptModalCrack.addEventListener('click', onDecryptModalCrack);
+  if (decryptProgressCancel) decryptProgressCancel.addEventListener('click', cancelCrack);
   if (decryptModalEl) {
     decryptModalEl.addEventListener('click', function (e) {
       if (e.target === decryptModalEl) closeDecryptModal();
@@ -1471,10 +1717,10 @@
       if (avatarEmoji) { avatarEmoji.style.display = 'none'; avatarEmoji.textContent = ''; }
       if (avatarPlaceholder) avatarPlaceholder.style.display = 'block';
     }
-    var createdAtStr = (json.created_at && typeof json.created_at === 'string') ? json.created_at.slice(0, 10) : '';
+    var createdAtStr = formatLocalTime(json.created_at, false).split(' ')[0] || '';
     setText('profileCreatedAt', createdAtStr || '未知');
     var q = json.quota || {};
-    var defaultTotal = getToken() ? 10 : 5;
+    var defaultTotal = getToken() ? 20 : 10;
     var enc = q.encrypt != null ? Math.max(0, q.encrypt) : defaultTotal;
     var unl = q.unlock != null ? Math.max(0, q.unlock) : defaultTotal;
     var com = q.compress != null ? Math.max(0, q.compress) : defaultTotal;
@@ -1652,7 +1898,7 @@
       visitsBody.innerHTML = '';
       (d.recent_visits || []).forEach(function (r) {
         var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + (r.created_at || '-').slice(0, 19) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || '-') + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td>';
+        tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || '-') + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td>';
         visitsBody.appendChild(tr);
       });
     }
@@ -1661,7 +1907,7 @@
       usageBody.innerHTML = '';
       (d.recent_usage || []).forEach(function (r) {
         var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + (r.created_at || '-').slice(0, 19) + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
+        tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
         usageBody.appendChild(tr);
       });
     }
@@ -1688,7 +1934,7 @@
     tbody.innerHTML = '';
     (json.data || []).forEach(function (r) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + (r.created_at || r.time || '-').slice(0, 19) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || r.path || '-') + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td>';
+      tr.innerHTML = '<td>' + formatLocalTime(r.created_at || r.time) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || r.path || '-') + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td>';
       tbody.appendChild(tr);
     });
     var pager = document.getElementById('adminAccessPager');
@@ -1703,7 +1949,7 @@
     tbody.innerHTML = '';
     (json.data || []).forEach(function (r) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + (r.created_at || r.time || '-').slice(0, 19) + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
+      tr.innerHTML = '<td>' + formatLocalTime(r.created_at || r.time) + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
       tbody.appendChild(tr);
     });
     var pager = document.getElementById('adminUsagePager');
@@ -1858,6 +2104,114 @@
       closePaymentConfirmLoading();
     }
   }
+  var pendingAdminUserEditId = null;
+
+  function openAdminUserEditModal(userId) {
+    pendingAdminUserEditId = userId;
+    var modal = document.getElementById('adminUserEditModal');
+    var hintEl = document.getElementById('adminUserEditHint');
+    if (hintEl) { hintEl.textContent = ''; hintEl.setAttribute('aria-hidden', 'true'); }
+    if (modal) {
+      modal.setAttribute('aria-hidden', 'false');
+      modal.classList.add('is-visible');
+    }
+    loadAdminUserDetail(userId);
+  }
+
+  function closeAdminUserEditModal() {
+    pendingAdminUserEditId = null;
+    var modal = document.getElementById('adminUserEditModal');
+    if (modal) {
+      if (document.activeElement && modal.contains(document.activeElement)) {
+        document.activeElement.blur();
+      }
+      modal.setAttribute('aria-hidden', 'true');
+      modal.classList.remove('is-visible');
+    }
+  }
+
+  async function loadAdminUserDetail(userId) {
+    var res = await fetchWithAuth(API_BASE + '/api/admin/users/' + userId);
+    if (!res.ok) {
+      showGlobalHint('加载用户信息失败', true);
+      closeAdminUserEditModal();
+      return;
+    }
+    var json = await res.json();
+    var user = json.data.user || {};
+    var quota = json.data.quota || {};
+    
+    var usernameEl = document.getElementById('adminUserEditUsername');
+    var emailEl = document.getElementById('adminUserEditEmail');
+    var nicknameEl = document.getElementById('adminUserEditNickname');
+    var phoneEl = document.getElementById('adminUserEditPhone');
+    var passwordEl = document.getElementById('adminUserEditPassword');
+    var isAdminEl = document.getElementById('adminUserEditIsAdmin');
+    var encryptEl = document.getElementById('adminUserEditEncrypt');
+    var unlockEl = document.getElementById('adminUserEditUnlock');
+    var compressEl = document.getElementById('adminUserEditCompress');
+    
+    if (usernameEl) usernameEl.value = user.username || '';
+    if (emailEl) emailEl.value = user.email || '';
+    if (nicknameEl) nicknameEl.value = user.nickname || '';
+    if (phoneEl) phoneEl.value = user.phone || '';
+    if (passwordEl) passwordEl.value = '';
+    if (isAdminEl) isAdminEl.checked = user.is_admin || false;
+    if (encryptEl) encryptEl.value = quota.encrypt != null ? quota.encrypt : '';
+    if (unlockEl) unlockEl.value = quota.unlock != null ? quota.unlock : '';
+    if (compressEl) compressEl.value = quota.compress != null ? quota.compress : '';
+  }
+
+  async function submitAdminUserEdit() {
+    var userId = pendingAdminUserEditId;
+    if (!userId) return;
+    
+    var usernameEl = document.getElementById('adminUserEditUsername');
+    var emailEl = document.getElementById('adminUserEditEmail');
+    var nicknameEl = document.getElementById('adminUserEditNickname');
+    var phoneEl = document.getElementById('adminUserEditPhone');
+    var passwordEl = document.getElementById('adminUserEditPassword');
+    var isAdminEl = document.getElementById('adminUserEditIsAdmin');
+    var encryptEl = document.getElementById('adminUserEditEncrypt');
+    var unlockEl = document.getElementById('adminUserEditUnlock');
+    var compressEl = document.getElementById('adminUserEditCompress');
+    var hintEl = document.getElementById('adminUserEditHint');
+    
+    var data = {};
+    if (usernameEl && usernameEl.value.trim()) data.username = usernameEl.value.trim();
+    if (emailEl && emailEl.value.trim()) data.email = emailEl.value.trim();
+    if (nicknameEl) data.nickname = nicknameEl.value.trim() || null;
+    if (phoneEl) data.phone = phoneEl.value.trim() || null;
+    if (passwordEl && passwordEl.value.trim()) data.password = passwordEl.value.trim();
+    if (isAdminEl) data.is_admin = isAdminEl.checked;
+    if (encryptEl && encryptEl.value !== '') data.encrypt_remaining = parseInt(encryptEl.value, 10);
+    if (unlockEl && unlockEl.value !== '') data.unlock_remaining = parseInt(unlockEl.value, 10);
+    if (compressEl && compressEl.value !== '') data.compress_remaining = parseInt(compressEl.value, 10);
+    
+    try {
+      var res = await fetchWithAuth(API_BASE + '/api/admin/users/' + userId, {
+        method: 'PUT',
+        body: data
+      });
+      var json = await res.json();
+      if (res.ok) {
+        closeAdminUserEditModal();
+        loadAdminUsers();
+        showGlobalHint('用户信息已更新');
+      } else {
+        if (hintEl) {
+          hintEl.textContent = json.error || '更新失败';
+          hintEl.setAttribute('aria-hidden', 'false');
+        }
+      }
+    } catch (err) {
+      if (hintEl) {
+        hintEl.textContent = '更新失败：' + (err.message || '网络错误');
+        hintEl.setAttribute('aria-hidden', 'false');
+      }
+    }
+  }
+
   async function loadAdminUsers() {
     var search = (document.getElementById('adminUserSearch') && document.getElementById('adminUserSearch').value || '').trim();
     var url = API_BASE + '/api/admin/users?page=1&page_size=20';
@@ -1871,12 +2225,16 @@
     (json.data || []).forEach(function (u) {
       var q = u.quota || {};
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + u.id + '</td><td>' + (u.nickname || u.username) + '</td><td>' + (u.email || '-') + '</td><td>' + (u.phone || '-') + '</td><td>' + (u.password_set ? '是' : '否') + '</td><td>' + (q.encrypt != null ? q.encrypt : '-') + '</td><td>' + (q.unlock != null ? q.unlock : '-') + '</td><td>' + (q.compress != null ? q.compress : '-') + '</td><td>' + (u.created_at || '').slice(0, 19) + '</td>';
+      var editBtn = '<button type="button" class="btn btn-secondary btn-sm" onclick="window.openAdminUserEdit(' + u.id + ')">编辑</button>';
+      tr.innerHTML = '<td>' + u.id + '</td><td>' + (u.nickname || u.username) + '</td><td>' + (u.email || '-') + '</td><td>' + (u.phone || '-') + '</td><td>' + (u.password_set ? '是' : '否') + '</td><td>' + (q.encrypt != null ? q.encrypt : '-') + '</td><td>' + (q.unlock != null ? q.unlock : '-') + '</td><td>' + (q.compress != null ? q.compress : '-') + '</td><td>' + formatLocalTime(u.created_at) + '</td><td>' + editBtn + '</td>';
       tbody.appendChild(tr);
     });
     var pager = document.getElementById('adminUsersPager');
     if (pager) pager.textContent = '共 ' + (json.total || 0) + ' 条';
   }
+  
+  // 暴露给全局，供 onclick 调用
+  window.openAdminUserEdit = openAdminUserEditModal;
   async function loadAdminPayments() {
     var res = await fetchWithAuth(API_BASE + '/api/admin/payments?page=1&page_size=50');
     if (!res.ok) return;
@@ -1886,7 +2244,7 @@
     tbody.innerHTML = '';
     (json.data || []).forEach(function (p) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + p.id + '</td><td>' + (p.username || p.user_id) + '</td><td>' + (p.phone || '-') + '</td><td>' + (p.pack_type || '') + '</td><td>' + p.quantity + '</td><td>' + p.amount + '</td><td>' + p.status + '</td><td>' + (p.created_at || '').slice(0, 19) + '</td>';
+      tr.innerHTML = '<td>' + p.id + '</td><td>' + (p.username || p.user_id) + '</td><td>' + (p.phone || '-') + '</td><td>' + (p.pack_type || '') + '</td><td>' + p.quantity + '</td><td>' + p.amount + '</td><td>' + p.status + '</td><td>' + formatLocalTime(p.created_at) + '</td>';
       tbody.appendChild(tr);
     });
     var pager = document.getElementById('adminPaymentsPager');
@@ -1990,6 +2348,18 @@
   });
   var adminUserSearchBtn = document.getElementById('adminUserSearchBtn');
   if (adminUserSearchBtn) adminUserSearchBtn.addEventListener('click', function () { loadAdminUsers(); });
+  
+  var adminUserEditModal = document.getElementById('adminUserEditModal');
+  var adminUserEditCancel = document.getElementById('adminUserEditCancel');
+  var adminUserEditSubmit = document.getElementById('adminUserEditSubmit');
+  if (adminUserEditCancel) adminUserEditCancel.addEventListener('click', closeAdminUserEditModal);
+  if (adminUserEditSubmit) adminUserEditSubmit.addEventListener('click', submitAdminUserEdit);
+  if (adminUserEditModal) {
+    adminUserEditModal.addEventListener('click', function (e) {
+      if (e.target === adminUserEditModal) closeAdminUserEditModal();
+    });
+  }
+  
   window.addEventListener('hashchange', applyAdminRoute);
 
   var authModalEl = document.getElementById('authModal');
