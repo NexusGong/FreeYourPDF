@@ -58,6 +58,23 @@ with app.app_context():
         print('[FreeYourPDF] usage_record 表补列:', e, flush=True)
         sys.stdout.flush()
 
+    # 为已有 user 表补全 phone、password_set（与 2Vision 一致的手机号登录）
+    try:
+        conn = db.engine.raw_connection()
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(user)")
+        existing_user_cols = {row[1] for row in cur.fetchall()}
+        for col, sql_type in [('phone', 'VARCHAR(20)'), ('password_set', 'INTEGER')]:
+            if col not in existing_user_cols:
+                cur.execute("ALTER TABLE user ADD COLUMN %s %s" % (col, sql_type))
+                conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        import sys
+        print('[FreeYourPDF] user 表补列:', e, flush=True)
+        sys.stdout.flush()
+
     # 启动时自动创建或提升初始管理员（Render 等线上环境配置 INITIAL_ADMIN_EMAIL + INITIAL_ADMIN_PASSWORD）
     def _ensure_initial_admin():
         email = (config_module.INITIAL_ADMIN_EMAIL or '').strip()
@@ -439,25 +456,45 @@ def _consume_anonymous_quota(anonymous_id, quota_type):
     return True, _anon_quota_dict(anon)
 
 
-# ----- 认证路由 -----
-@app.route('/api/auth/send-code', methods=['POST'])
-def api_send_code():
-    return auth_module.send_code()
+# ----- 认证路由（手机号+短信/密码，与 2Vision 一致）-----
+@app.route('/api/auth/sms/send', methods=['POST'])
+def api_sms_send():
+    return auth_module.sms_send()
 
 
-@app.route('/api/auth/register', methods=['POST'])
-def api_register():
-    return auth_module.register()
+@app.route('/api/auth/sms/submit', methods=['POST'])
+def api_sms_submit():
+    return auth_module.sms_submit()
 
 
-@app.route('/api/auth/login', methods=['POST'])
-def api_login():
-    return auth_module.login()
+@app.route('/api/auth/sms/register', methods=['POST'])
+def api_sms_register():
+    return auth_module.sms_register()
 
 
-@app.route('/api/auth/login-by-code', methods=['POST'])
-def api_login_by_code():
-    return auth_module.login_by_code()
+@app.route('/api/auth/sms/login', methods=['POST'])
+def api_sms_login():
+    return auth_module.sms_login()
+
+
+@app.route('/api/auth/password/login', methods=['POST'])
+def api_password_login():
+    return auth_module.password_login()
+
+
+@app.route('/api/auth/password/set', methods=['POST'])
+def api_password_set():
+    return auth_module.password_set()
+
+
+@app.route('/api/auth/password/change', methods=['POST'])
+def api_password_change_sms():
+    return auth_module.password_change_sms()
+
+
+@app.route('/api/auth/password/status', methods=['GET'])
+def api_password_status():
+    return auth_module.password_status()
 
 
 @app.route('/api/visit', methods=['POST'])
@@ -532,6 +569,8 @@ def api_user_profile_get():
         'email': user.email,
         'nickname': getattr(user, 'nickname', None) or user.username,
         'avatar': getattr(user, 'avatar', None),
+        'phone': getattr(user, 'phone', None),
+        'password_set': getattr(user, 'password_set', False),
         'is_admin': getattr(user, 'is_admin', False),
         'quota': q,
         'created_at': user.created_at.isoformat() if user.created_at else None,
@@ -908,6 +947,8 @@ def api_admin_users():
         cond = User.username.contains(search) | User.email.contains(search)
         if hasattr(User, 'nickname'):
             cond = cond | User.nickname.contains(search)
+        if hasattr(User, 'phone') and User.phone is not None:
+            cond = cond | User.phone.contains(search)
         q = q.filter(cond)
     total = q.count()
     users = q.order_by(User.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
@@ -919,6 +960,8 @@ def api_admin_users():
             'username': u.username,
             'email': u.email,
             'nickname': getattr(u, 'nickname', None),
+            'phone': getattr(u, 'phone', None),
+            'password_set': getattr(u, 'password_set', False),
             'is_admin': getattr(u, 'is_admin', False),
             'quota': _quota_dict(quota) if quota else None,
             'created_at': u.created_at.isoformat() if u.created_at else None,
@@ -945,6 +988,8 @@ def api_admin_user_detail(user_id):
                 'username': user.username,
                 'email': user.email,
                 'nickname': getattr(user, 'nickname', None),
+                'phone': getattr(user, 'phone', None),
+                'password_set': getattr(user, 'password_set', False),
                 'is_admin': getattr(user, 'is_admin', False),
                 'created_at': user.created_at.isoformat() if user.created_at else None,
             },
@@ -979,6 +1024,15 @@ def api_admin_user_update(user_id):
         user.email = data['email'].strip().lower()
     if 'nickname' in data:
         user.nickname = (data['nickname'] or '').strip() or None
+    if 'phone' in data:
+        phone_val = (data.get('phone') or '').strip().replace(' ', '').replace('-', '') or None
+        if phone_val:
+            other = User.query.filter(User.phone == phone_val, User.id != user_id).first()
+            if other:
+                return jsonify({'error': '该手机号已被其他用户使用'}), 400
+            user.phone = phone_val
+        else:
+            user.phone = None
     if 'is_admin' in data:
         user.is_admin = bool(data['is_admin'])
     if 'password' in data and data['password']:
@@ -1004,6 +1058,8 @@ def api_admin_user_update(user_id):
             'username': user.username,
             'email': user.email,
             'nickname': getattr(user, 'nickname', None),
+            'phone': getattr(user, 'phone', None),
+            'password_set': getattr(user, 'password_set', False),
             'is_admin': getattr(user, 'is_admin', False),
             'quota': _quota_dict(quota) if quota else None,
         },
@@ -1048,6 +1104,7 @@ def api_admin_payments():
             'user_id': p.user_id,
             'username': u.username if u else None,
             'email': u.email if u else None,
+            'phone': getattr(u, 'phone', None) if u else None,
             'pack_type': p.pack_type,
             'amount': p.amount,
             'quantity': p.quantity,
@@ -1134,6 +1191,7 @@ def api_admin_monitor_realtime():
             'location': _format_location(v.country, v.region, v.city),
             'device_type': v.device_type or 'unknown',
             'username': u.username if u else ('ID:%s' % v.user_id if v.user_id else '匿名'),
+            'phone': getattr(u, 'phone', None) if u else None,
         })
     # 最近 10 条使用
     usages = UsageRecord.query.order_by(UsageRecord.created_at.desc()).limit(10).all()
@@ -1145,6 +1203,7 @@ def api_admin_monitor_realtime():
             'id': r.id,
             'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
             'username': u.username if u else ('ID:%s' % r.user_id if r.user_id else '匿名'),
+            'phone': getattr(u, 'phone', None) if u else None,
             'type': type_label,
             'usage_type': r.usage_type,
             'ip_address': r.ip_address,
@@ -1184,8 +1243,10 @@ def api_admin_access_logs():
         if v.user_id:
             u = db.session.get(User, v.user_id)
             user_display = u.username if u else ('ID:%s' % v.user_id)
+            user_phone = getattr(u, 'phone', None) if u else None
         else:
             user_display = '匿名'
+            user_phone = None
         out.append({
             'id': v.id,
             'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
@@ -1194,6 +1255,7 @@ def api_admin_access_logs():
             'location': _format_location(v.country, v.region, v.city),
             'user_id': v.user_id,
             'username': user_display,
+            'phone': user_phone,
             'device_type': v.device_type or 'unknown',
             'user_agent': (v.user_agent[:80] + '…') if v.user_agent and len(v.user_agent) > 80 else v.user_agent,
         })
@@ -1218,14 +1280,17 @@ def api_admin_usage_logs():
         if r.user_id:
             u = db.session.get(User, r.user_id)
             user_display = u.username if u else ('ID:%s' % r.user_id)
+            user_phone = getattr(u, 'phone', None) if u else None
         else:
             user_display = '匿名'
+            user_phone = None
         type_label = {'encrypt': '加密', 'unlock': '解锁', 'compress': '体积优化'}.get(r.usage_type, r.usage_type or '—')
         out.append({
             'id': r.id,
             'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
             'user_id': r.user_id,
             'username': user_display,
+            'phone': user_phone,
             'type': type_label,
             'usage_type': r.usage_type,
             'api_endpoint': r.api_endpoint,

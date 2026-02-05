@@ -13,6 +13,8 @@ class User(db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     username = db.Column(db.String(64), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
+    password_set = db.Column(db.Boolean, default=False)  # 手机号注册用户是否已设置密码（与 2Vision 一致）
+    phone = db.Column(db.String(20), unique=True, index=True, nullable=True)  # 手机号，用于验证码/密码登录
     nickname = db.Column(db.String(50), nullable=True)
     avatar = db.Column(db.Text, nullable=True)  # Base64 头像
     is_admin = db.Column(db.Boolean, default=False)
@@ -20,6 +22,7 @@ class User(db.Model):
 
     def set_password(self, raw_password):
         self.password_hash = generate_password_hash(raw_password)
+        self.password_set = True
 
     def check_password(self, raw_password):
         return check_password_hash(self.password_hash, raw_password)

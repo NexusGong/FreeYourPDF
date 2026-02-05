@@ -120,54 +120,44 @@
     </footer>
   </div>
 
-  <!-- 登录 / 注册弹窗 -->
+  <!-- 登录 / 注册弹窗（统一入口：手机号+验证码，老用户直接登录，新用户弹窗设置用户名和密码） -->
   <div class="modal-overlay" id="authModal" aria-hidden="true">
     <div class="modal auth-modal">
       <h3 class="modal-title" id="authModalTitle">登录</h3>
-      <nav class="auth-tabs" role="tablist">
-        <button type="button" class="auth-tab is-active" id="authTabLogin" role="tab" aria-selected="true" data-auth-tab="login">登录</button>
-        <button type="button" class="auth-tab" id="authTabRegister" role="tab" aria-selected="false" data-auth-tab="register">注册</button>
-      </nav>
 
-      <div class="auth-panel" id="authPanelLogin" data-auth-panel="login">
+      <div class="auth-panel auth-step" id="authStepVerify" data-auth-step="verify">
         <div class="auth-login-method">
-          <button type="button" class="auth-subtab is-active" data-login-method="password">用户名/邮箱 + 密码</button>
-          <button type="button" class="auth-subtab" data-login-method="code">邮箱验证码登录</button>
+          <button type="button" class="auth-subtab is-active" data-auth-login-method="code">验证码登录</button>
+          <button type="button" class="auth-subtab" data-auth-login-method="password">密码登录</button>
         </div>
-        <div class="auth-form auth-form-login-password" id="authFormLoginPassword">
-          <label class="modal-label" for="loginLogin">用户名或邮箱</label>
-          <input type="text" id="loginLogin" class="input" placeholder="用户名或邮箱" autocomplete="off">
-          <label class="modal-label" for="loginPassword">密码</label>
-          <input type="password" id="loginPassword" class="input" placeholder="密码" autocomplete="off">
-          <button type="button" class="btn btn-primary btn-block" id="btnLoginSubmit">登录</button>
-        </div>
-        <div class="auth-form auth-form-login-code" id="authFormLoginCode" style="display:none;">
-          <label class="modal-label" for="loginCodeEmail">邮箱</label>
+        <div class="auth-form-inner" id="authFormCode">
+          <label class="modal-label" for="authPhone">手机号</label>
           <div class="input-row">
-            <input type="email" id="loginCodeEmail" class="input" placeholder="邮箱" autocomplete="off">
-            <button type="button" class="btn btn-secondary" id="btnLoginSendCode">获取验证码</button>
+            <input type="tel" id="authPhone" class="input" placeholder="11 位手机号" autocomplete="tel" maxlength="11">
+            <button type="button" class="btn btn-secondary" id="authSendCode">获取验证码</button>
           </div>
-          <label class="modal-label" for="loginCode">验证码</label>
-          <input type="text" id="loginCode" class="input" placeholder="验证码" autocomplete="off" maxlength="6">
-          <button type="button" class="btn btn-primary btn-block" id="btnLoginByCodeSubmit">验证码登录</button>
+          <label class="modal-label" for="authCode">验证码</label>
+          <input type="text" id="authCode" class="input" placeholder="短信验证码" autocomplete="off" maxlength="6">
+          <button type="button" class="btn btn-primary btn-block" id="authSubmitCode">登录</button>
+        </div>
+        <div class="auth-form-inner" id="authFormPassword" style="display:none;">
+          <label class="modal-label" for="authPasswordPhone">手机号</label>
+          <input type="tel" id="authPasswordPhone" class="input" placeholder="11 位手机号" autocomplete="tel" maxlength="11">
+          <label class="modal-label" for="authPassword">密码</label>
+          <input type="password" id="authPassword" class="input" placeholder="密码" autocomplete="off">
+          <button type="button" class="btn btn-primary btn-block" id="authSubmitPassword">登录</button>
         </div>
       </div>
 
-      <div class="auth-panel" id="authPanelRegister" data-auth-panel="register" style="display:none;">
-        <label class="modal-label" for="regEmail">邮箱</label>
-        <div class="input-row">
-          <input type="email" id="regEmail" class="input" placeholder="邮箱" autocomplete="off">
-          <button type="button" class="btn btn-secondary" id="btnRegSendCode">获取验证码</button>
-        </div>
-        <label class="modal-label" for="regCode">验证码</label>
-        <input type="text" id="regCode" class="input" placeholder="验证码" autocomplete="off" maxlength="6">
-        <label class="modal-label" for="regUsername">用户名</label>
-        <input type="text" id="regUsername" class="input" placeholder="2～32 位，字母/数字/下划线/中文" autocomplete="off">
-        <label class="modal-label" for="regPassword">密码</label>
-        <input type="password" id="regPassword" class="input" placeholder="至少 6 位" autocomplete="off">
-        <label class="modal-label" for="regPasswordConfirm">确认密码</label>
-        <input type="password" id="regPasswordConfirm" class="input" placeholder="再次输入密码" autocomplete="off">
-        <button type="button" class="btn btn-primary btn-block" id="btnRegisterSubmit">注册</button>
+      <div class="auth-panel auth-step" id="authStepSetProfile" data-auth-step="set-profile" style="display:none;">
+        <p class="auth-step-desc">请设置用户名和密码完成注册</p>
+        <label class="modal-label" for="authNewUsername">用户名</label>
+        <input type="text" id="authNewUsername" class="input" placeholder="2～32 位，字母/数字/下划线/中文" autocomplete="off" maxlength="32">
+        <label class="modal-label" for="authNewPassword">密码</label>
+        <input type="password" id="authNewPassword" class="input" placeholder="至少 6 位" autocomplete="new-password">
+        <label class="modal-label" for="authNewPasswordConfirm">确认密码</label>
+        <input type="password" id="authNewPasswordConfirm" class="input" placeholder="再次输入密码" autocomplete="new-password">
+        <button type="button" class="btn btn-primary btn-block" id="authCompleteRegister">完成注册</button>
       </div>
 
       <p class="modal-hint modal-hint-error" id="authModalHint" aria-hidden="true"></p>
@@ -190,6 +180,10 @@
         <div class="profile-info-row">
           <span class="profile-info-label">邮箱</span>
           <input type="text" id="profileEmail" class="input profile-input-inline profile-input-readonly" readonly placeholder="邮箱" autocomplete="off">
+        </div>
+        <div class="profile-info-row">
+          <span class="profile-info-label">手机号</span>
+          <span class="profile-info-value" id="profilePhone">—</span>
         </div>
         <div class="profile-info-row">
           <span class="profile-info-label">昵称</span>
@@ -345,18 +339,18 @@
       </div>
       <div class="admin-panel" id="adminPanelAccess" data-admin-panel="access" style="display:none;">
         <h2 class="admin-section-title">访问记录</h2>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>IP</th><th>位置</th><th>设备</th><th>用户</th></tr></thead><tbody id="adminAccessBody"></tbody></table></div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>IP</th><th>位置</th><th>设备</th><th>用户</th><th>手机号</th></tr></thead><tbody id="adminAccessBody"></tbody></table></div>
         <p class="admin-pager" id="adminAccessPager">暂无数据</p>
       </div>
       <div class="admin-panel" id="adminPanelUsers" data-admin-panel="users" style="display:none;">
         <h2 class="admin-section-title">用户管理</h2>
-        <div class="admin-search"><input type="text" id="adminUserSearch" class="input" placeholder="搜索用户名/邮箱"><button type="button" class="btn btn-secondary btn-sm" id="adminUserSearchBtn">搜索</button></div>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>加密</th><th>解锁</th><th>体积</th><th>注册时间</th></tr></thead><tbody id="adminUsersBody"></tbody></table></div>
+        <div class="admin-search"><input type="text" id="adminUserSearch" class="input" placeholder="搜索用户名/邮箱/手机号"><button type="button" class="btn btn-secondary btn-sm" id="adminUserSearchBtn">搜索</button></div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>手机号</th><th>已设密码</th><th>加密</th><th>解锁</th><th>体积</th><th>注册时间</th></tr></thead><tbody id="adminUsersBody"></tbody></table></div>
         <p class="admin-pager" id="adminUsersPager"></p>
       </div>
       <div class="admin-panel" id="adminPanelUsage" data-admin-panel="usage" style="display:none;">
         <h2 class="admin-section-title">使用记录</h2>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>用户</th><th>类型</th><th>IP</th><th>位置</th></tr></thead><tbody id="adminUsageBody"></tbody></table></div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>用户</th><th>手机号</th><th>类型</th><th>IP</th><th>位置</th></tr></thead><tbody id="adminUsageBody"></tbody></table></div>
         <p class="admin-pager" id="adminUsagePager">暂无数据</p>
       </div>
       <div class="admin-panel" id="adminPanelMonitor" data-admin-panel="monitor" style="display:none;">
@@ -371,18 +365,18 @@
         <div class="admin-realtime-grid">
           <div class="admin-realtime-block">
             <h3 class="admin-subtitle">最近访问</h3>
-            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>IP</th><th>位置</th><th>设备</th><th>用户</th></tr></thead><tbody id="adminMonitorRecentVisitsBody"></tbody></table></div>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>IP</th><th>位置</th><th>设备</th><th>用户</th><th>手机号</th></tr></thead><tbody id="adminMonitorRecentVisitsBody"></tbody></table></div>
           </div>
           <div class="admin-realtime-block">
             <h3 class="admin-subtitle">最近使用</h3>
-            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>用户</th><th>类型</th><th>IP</th><th>位置</th></tr></thead><tbody id="adminMonitorRecentUsageBody"></tbody></table></div>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>用户</th><th>手机号</th><th>类型</th><th>IP</th><th>位置</th></tr></thead><tbody id="adminMonitorRecentUsageBody"></tbody></table></div>
           </div>
         </div>
         <p class="admin-monitor-tip">每 5 秒自动刷新</p>
       </div>
       <div class="admin-panel" id="adminPanelPayments" data-admin-panel="payments" style="display:none;">
         <h2 class="admin-section-title">支付记录</h2>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>用户</th><th>类型</th><th>数量</th><th>金额</th><th>状态</th><th>时间</th></tr></thead><tbody id="adminPaymentsBody"></tbody></table></div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID</th><th>用户</th><th>手机号</th><th>类型</th><th>数量</th><th>金额</th><th>状态</th><th>时间</th></tr></thead><tbody id="adminPaymentsBody"></tbody></table></div>
         <p class="admin-pager" id="adminPaymentsPager"></p>
       </div>
       <div class="admin-panel" id="adminPanelPaymentTest" data-admin-panel="payment-test" style="display:none;">

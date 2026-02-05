@@ -362,14 +362,24 @@ body {
 
 .auth-form .modal-label,
 .auth-form .input,
-.auth-form .btn-block {
+.auth-form .btn-block,
+.auth-step .modal-label,
+.auth-step .input,
+.auth-step .btn-block {
   display: block;
   width: 100%;
   margin-bottom: var(--space-sm);
 }
 
-.auth-form .modal-label:first-child {
+.auth-form .modal-label:first-child,
+.auth-step .modal-label:first-child {
   margin-top: 0;
+}
+
+.auth-step-desc {
+  margin-bottom: var(--space-md);
+  color: var(--text-muted);
+  font-size: 0.95rem;
 }
 
 .input-row {

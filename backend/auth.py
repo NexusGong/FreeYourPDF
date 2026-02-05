@@ -1,26 +1,19 @@
 # -*- coding: utf-8 -*-
-"""认证：发送验证码、注册、登录（密码/验证码）。"""
+"""认证：手机号+短信/密码（与 2Vision 一致），仅保留短信验证码与密码登录/注册。"""
 import os
 import re
-import random
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.utils import formatdate
+import secrets
 from datetime import datetime, timedelta
 
 import jwt
 from flask import request, jsonify, current_app
 
-from models import db, User, Quota, VerificationCode
+from models import db, User, Quota
 import config as config_module
-
-# 内存限流：同一邮箱最近发送时间 { email: timestamp }
-_send_code_last = {}
 
 
 def _user_to_dict(user):
-    """与 app.api_me 一致的当前用户信息，供登录/注册返回，含头像等。"""
+    """与 app.api_me 一致的当前用户信息，供登录/注册返回，含头像、手机号、密码状态（与 2Vision 一致）。"""
     return {
         'id': user.id,
         'email': user.email,
@@ -28,146 +21,10 @@ def _user_to_dict(user):
         'nickname': getattr(user, 'nickname', None) or user.username,
         'avatar': getattr(user, 'avatar', None),
         'is_admin': getattr(user, 'is_admin', False),
+        'phone': getattr(user, 'phone', None),
+        'password_set': getattr(user, 'password_set', False),
         'created_at': user.created_at.isoformat() if getattr(user, 'created_at', None) else None,
     }
-
-
-def _verification_email_body_plain(code, expire_minutes):
-    """验证码邮件纯文本正文。"""
-    return (
-        'FreeYourPDF 邮箱验证码\n'
-        '────────────────────────\n\n'
-        f'验证码：{code}\n'
-        f'有效期：{expire_minutes} 分钟\n\n'
-        '请勿将验证码告知他人。如非本人操作，请忽略本邮件。\n\n'
-        '此邮件由系统自动发送，请勿直接回复。\n'
-        '────────────────────────\n'
-        'FreeYourPDF · PDF 加密 / 解锁 / 体积优化'
-    )
-
-
-def _verification_email_body_html(code, expire_minutes):
-    """验证码邮件 HTML 正文（邮件客户端兼容 + 强设计感）。"""
-    # 使用 .format 避免 f-string 中花括号被误解析；code/expire_minutes 在调用处安全
-    return '''<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN">
-<head>
-  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FreeYourPDF 验证码</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f0f0f5;font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#333;line-height:1.5;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f0f5;padding:32px 16px;">
-    <tr>
-      <td align="center">
-        <table width="560" cellpadding="0" cellspacing="0" border="0" align="center" style="background-color:#ffffff;border:1px solid #e0e0e5;">
-          <tr>
-            <td bgcolor="#7c3aed" style="height:8px;font-size:0;line-height:0;">&#160;</td>
-          </tr>
-          <tr>
-            <td style="padding:32px 40px 24px 40px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td>
-                    <p style="margin:0;font-size:24px;font-weight:bold;color:#1a1a2e;">FreeYourPDF</p>
-                    <p style="margin:6px 0 0;font-size:13px;color:#6b7280;">PDF 加密 &#183; 解锁 &#183; 体积优化</p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 40px 32px 40px;">
-              <p style="margin:0 0 6px;font-size:14px;font-weight:bold;color:#374151;">邮箱验证码</p>
-              <p style="margin:0 0 20px;font-size:14px;color:#6b7280;">请将下方验证码填入页面中，完成登录或注册。</p>
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f8f4ff" style="border-left:4px solid #7c3aed;">
-                <tr>
-                  <td style="padding:28px 24px;text-align:center;">
-                    <span style="font-size:36px;font-weight:bold;letter-spacing:10px;color:#1a1a2e;font-family:Consolas,Monaco,monospace;">''' + code + '''</span>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin:20px 0 0;font-size:13px;color:#6b7280;">有效期 <strong>''' + str(expire_minutes) + ''' 分钟</strong>，请勿泄露给他人。</p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:24px 40px 32px 40px;border-top:1px solid #e5e7eb;">
-              <p style="margin:0;font-size:12px;color:#9ca3af;">如非本人操作，请忽略本邮件。</p>
-              <p style="margin:8px 0 0;font-size:12px;color:#9ca3af;">此邮件由系统自动发送，请勿直接回复。</p>
-              <p style="margin:20px 0 0;font-size:11px;color:#d1d5db;">&#169; FreeYourPDF</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>'''
-
-
-def _send_email(to_email, subject, body_text, body_html=None):
-    """通过环境变量配置的 SMTP 发送邮件。失败抛异常。"""
-    host = config_module.SMTP_HOST
-    user = config_module.SMTP_USER
-    password = config_module.SMTP_PASSWORD
-    port = config_module.SMTP_PORT
-    use_tls = config_module.SMTP_USE_TLS
-    if not host or not user or not password:
-        raise RuntimeError('邮件服务未配置')
-    # multipart/alternative：RFC 规定从“最不丰富”到“最丰富”排列，即先 plain 再 html，
-    # 客户端会选自己支持的最后一种，这样 QQ 邮箱等才会显示 HTML 而不是纯文本
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From'] = user
-    msg['To'] = to_email
-    msg['Date'] = formatdate(localtime=True)
-    msg['MIME-Version'] = '1.0'
-    msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
-    if body_html:
-        html_part = MIMEText(body_html, 'html', 'utf-8')
-        html_part.set_charset('utf-8')
-        msg.attach(html_part)
-    with smtplib.SMTP(host, port) as s:
-        if use_tls:
-            s.starttls()
-        s.login(user, password)
-        s.sendmail(user, [to_email], msg.as_string())
-
-
-def send_code():
-    """POST /api/auth/send-code { email }"""
-    data = request.get_json(silent=True) or {}
-    email = (data.get('email') or '').strip().lower()
-    if not email:
-        return jsonify({'error': '请填写邮箱'}), 400
-    if not re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
-        return jsonify({'error': '邮箱格式不正确'}), 400
-
-    now = datetime.utcnow()
-    last = _send_code_last.get(email)
-    if last and (now - last).total_seconds() < config_module.CODE_COOLDOWN_SECONDS:
-        return jsonify({'error': '发送过于频繁，请稍后再试'}), 429
-
-    code = ''.join(str(random.randint(0, 9)) for _ in range(6))
-    expires_at = now + timedelta(minutes=config_module.CODE_EXPIRE_MINUTES)
-    rec = VerificationCode(email=email, code=code, expires_at=expires_at)
-    db.session.add(rec)
-    db.session.commit()
-
-    try:
-        expire_min = config_module.CODE_EXPIRE_MINUTES
-        _send_email(
-            email,
-            '【FreeYourPDF】您的验证码',
-            _verification_email_body_plain(code, expire_min),
-            _verification_email_body_html(code, expire_min),
-        )
-    except Exception as e:
-        current_app.logger.warning('send_code email failed: %s', e)
-        return jsonify({'error': '邮件发送失败，请检查邮件服务配置或稍后重试'}), 503
-
-    _send_code_last[email] = now
-    return jsonify({'ok': True})
 
 
 def _validate_username(username):
@@ -179,112 +36,6 @@ def _validate_username(username):
     if username.lower() in reserved:
         return False, '该用户名不可用'
     return True, None
-
-
-def register():
-    """POST /api/auth/register { email, code, username, password }"""
-    data = request.get_json(silent=True) or {}
-    email = (data.get('email') or '').strip().lower()
-    code = (data.get('code') or '').strip()
-    username = (data.get('username') or '').strip()
-    password = data.get('password') or ''
-
-    if not email:
-        return jsonify({'error': '请填写邮箱'}), 400
-    if not code:
-        return jsonify({'error': '请填写验证码'}), 400
-    ok, err = _validate_username(username)
-    if not ok:
-        return jsonify({'error': err}), 400
-    if not password or len(password) < 6:
-        return jsonify({'error': '密码至少 6 位'}), 400
-
-    now = datetime.utcnow()
-    rec = VerificationCode.query.filter_by(email=email).order_by(VerificationCode.created_at.desc()).first()
-    if not rec or rec.code != code or rec.expires_at < now:
-        return jsonify({'error': '验证码错误或已过期'}), 400
-
-    if User.query.filter_by(email=email).first():
-        return jsonify({'error': '该邮箱已注册'}), 400
-    if User.query.filter_by(username=username).first():
-        return jsonify({'error': '用户名已被使用'}), 400
-
-    user = User(email=email, username=username)
-    user.set_password(password)
-    if config_module.INITIAL_ADMIN_EMAIL and email == config_module.INITIAL_ADMIN_EMAIL:
-        user.is_admin = True
-    db.session.add(user)
-    db.session.flush()
-    quota = Quota(
-        user_id=user.id,
-        encrypt_remaining=config_module.DEFAULT_QUOTA_ENCRYPT,
-        unlock_remaining=config_module.DEFAULT_QUOTA_UNLOCK,
-        compress_remaining=config_module.DEFAULT_QUOTA_COMPRESS,
-    )
-    db.session.add(quota)
-    db.session.commit()
-
-    token = _make_token(user.id)
-    import sys
-    print('[FreeYourPDF] 注册成功 user_id=%s email=%s' % (user.id, user.email), flush=True)
-    sys.stdout.flush()
-    return jsonify({
-        'access_token': token,
-        'user': _user_to_dict(user),
-    })
-
-
-def login():
-    """POST /api/auth/login { login, password }"""
-    data = request.get_json(silent=True) or {}
-    login_str = (data.get('login') or '').strip()
-    password = data.get('password') or ''
-
-    if not login_str or not password:
-        return jsonify({'error': '请填写用户名/邮箱和密码'}), 400
-
-    user = User.query.filter(
-        (User.username == login_str) | (User.email == login_str)
-    ).first()
-    if not user or not user.check_password(password):
-        return jsonify({'error': '用户名或密码错误'}), 401
-
-    token = _make_token(user.id)
-    import sys
-    print('[FreeYourPDF] 登录成功 user_id=%s' % user.id, flush=True)
-    sys.stdout.flush()
-    return jsonify({
-        'access_token': token,
-        'user': _user_to_dict(user),
-    })
-
-
-def login_by_code():
-    """POST /api/auth/login-by-code { email, code }"""
-    data = request.get_json(silent=True) or {}
-    email = (data.get('email') or '').strip().lower()
-    code = (data.get('code') or '').strip()
-
-    if not email or not code:
-        return jsonify({'error': '请填写邮箱和验证码'}), 400
-
-    now = datetime.utcnow()
-    rec = VerificationCode.query.filter_by(email=email).order_by(VerificationCode.created_at.desc()).first()
-    if not rec or rec.code != code or rec.expires_at < now:
-        return jsonify({'error': '验证码错误或已过期'}), 400
-
-    user = User.query.filter_by(email=email).first()
-    if not user:
-        return jsonify({'error': '该邮箱尚未注册'}), 400
-
-    token = _make_token(user.id)
-    import sys
-    print('[FreeYourPDF] 验证码登录成功 user_id=%s' % user.id, flush=True)
-    sys.stdout.flush()
-    return jsonify({
-        'access_token': token,
-        'user': _user_to_dict(user),
-    })
 
 
 def _make_token(user_id):
@@ -315,3 +66,230 @@ def decode_token(token):
         print('[FreeYourPDF] JWT 解码失败', flush=True)
         sys.stdout.flush()
         return None
+
+
+# ---------- 手机号 + 短信/密码（与 2Vision 一致）----------
+
+def _get_user_by_phone(phone):
+    return User.query.filter_by(phone=phone).first()
+
+
+def _create_user_by_phone(username, phone, password=None):
+    """手机号注册：虚拟邮箱。password 若传入则设置并 password_set=True，否则随机密码且 password_set=False。"""
+    virtual_email = "phone_%s@sms.user" % phone
+    n = 0
+    while User.query.filter_by(email=virtual_email).first():
+        n += 1
+        virtual_email = "phone_%s_%s@sms.user" % (phone, n)
+    user = User(
+        username=username,
+        email=virtual_email,
+        phone=phone,
+        password_set=bool(password),
+    )
+    if password:
+        user.set_password(password)
+    else:
+        from werkzeug.security import generate_password_hash
+        user.password_hash = generate_password_hash(secrets.token_urlsafe(32))
+    db.session.add(user)
+    db.session.flush()
+    quota = Quota(
+        user_id=user.id,
+        encrypt_remaining=config_module.DEFAULT_QUOTA_ENCRYPT,
+        unlock_remaining=config_module.DEFAULT_QUOTA_UNLOCK,
+        compress_remaining=config_module.DEFAULT_QUOTA_COMPRESS,
+    )
+    db.session.add(quota)
+    db.session.commit()
+    return user
+
+
+def sms_send():
+    """POST /api/auth/sms/send { phone }"""
+    import sms as sms_module
+    data = request.get_json(silent=True) or {}
+    phone = (data.get("phone") or "").strip().replace(" ", "").replace("-", "")
+    if not sms_module.is_valid_phone(phone):
+        return jsonify({"error": "手机号格式不正确，请输入以1开头的11位数字"}), 400
+    remaining = sms_module.get_sms_remaining_seconds(phone)
+    if remaining > 0:
+        return jsonify({"error": "发送过于频繁，请 %s 秒后再试" % remaining}), 429
+    if not sms_module.send_sms_code(phone):
+        return jsonify({"error": "验证码发送失败，请稍后重试"}), 500
+    user_exists = _get_user_by_phone(phone) is not None
+    return jsonify({
+        "message": "验证码已发送",
+        "phone": phone,
+        "expire_minutes": config_module.SMS_CODE_EXPIRE_MINUTES,
+        "user_exists": user_exists,
+    })
+
+
+def sms_register():
+    """POST /api/auth/sms/register { username, phone, code [, password ] } -> token + user（新用户验证码通过后设置用户名和密码）"""
+    import sms as sms_module
+    data = request.get_json(silent=True) or {}
+    phone = (data.get("phone") or "").strip().replace(" ", "").replace("-", "")
+    username = (data.get("username") or "").strip()
+    code = (data.get("code") or "").strip()
+    password = (data.get("password") or "").strip() or None
+    if not sms_module.is_valid_phone(phone):
+        return jsonify({"error": "手机号格式不正确"}), 400
+    if not sms_module.verify_sms_code(phone, code, consume=True):
+        return jsonify({"error": "验证码错误或已过期"}), 400
+    if _get_user_by_phone(phone):
+        return jsonify({"error": "该手机号已被注册"}), 400
+    ok, err = _validate_username(username)
+    if not ok:
+        return jsonify({"error": err}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "用户名已存在"}), 400
+    if password and len(password) < 6:
+        return jsonify({"error": "密码至少 6 位"}), 400
+    user = _create_user_by_phone(username, phone, password=password)
+    token = _make_token(user.id)
+    return jsonify({
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _user_to_dict(user),
+    }), 201
+
+
+def sms_submit():
+    """
+    统一入口：POST /api/auth/sms/submit { phone, code }
+    - 验证码正确且已注册：消耗验证码并返回 token（直接登录）。
+    - 验证码正确且未注册：不消耗验证码，返回 need_register: true，前端弹窗让用户设置用户名和密码后调 register。
+    """
+    import sms as sms_module
+    data = request.get_json(silent=True) or {}
+    phone = (data.get("phone") or "").strip().replace(" ", "").replace("-", "")
+    code = (data.get("code") or "").strip()
+    if not sms_module.is_valid_phone(phone):
+        return jsonify({"error": "手机号格式不正确"}), 400
+    if not sms_module.verify_sms_code(phone, code, consume=False):
+        return jsonify({"error": "验证码错误或已过期"}), 400
+    user = _get_user_by_phone(phone)
+    if user:
+        sms_module.verify_sms_code(phone, code, consume=True)
+        token = _make_token(user.id)
+        return jsonify({
+            "access_token": token,
+            "token_type": "bearer",
+            "user": _user_to_dict(user),
+        })
+    return jsonify({"need_register": True, "phone": phone})
+
+
+def sms_login():
+    """POST /api/auth/sms/login { phone, code } -> token（保留供兼容）"""
+    import sms as sms_module
+    data = request.get_json(silent=True) or {}
+    phone = (data.get("phone") or "").strip().replace(" ", "").replace("-", "")
+    code = (data.get("code") or "").strip()
+    if not sms_module.is_valid_phone(phone):
+        return jsonify({"error": "手机号格式不正确"}), 400
+    if not sms_module.verify_sms_code(phone, code):
+        return jsonify({"error": "验证码错误或已过期"}), 400
+    user = _get_user_by_phone(phone)
+    if not user:
+        return jsonify({"error": "该手机号未注册，请先注册"}), 404
+    token = _make_token(user.id)
+    return jsonify({
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _user_to_dict(user),
+    })
+
+
+def password_login():
+    """POST /api/auth/password/login { phone, password } -> token"""
+    import sms as sms_module
+    data = request.get_json(silent=True) or {}
+    phone = (data.get("phone") or "").strip().replace(" ", "").replace("-", "")
+    password = data.get("password") or ""
+    if not sms_module.is_valid_phone(phone):
+        return jsonify({"error": "手机号格式不正确"}), 400
+    user = _get_user_by_phone(phone)
+    if not user:
+        return jsonify({"error": "该手机号未注册"}), 404
+    if not getattr(user, "password_set", False):
+        return jsonify({"error": "该账号未设置密码，请使用验证码登录"}), 400
+    if not user.check_password(password):
+        return jsonify({"error": "密码错误"}), 401
+    token = _make_token(user.id)
+    return jsonify({
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _user_to_dict(user),
+    })
+
+
+def _current_user_id():
+    """从 Authorization: Bearer 解析出 user_id，无效返回 None。"""
+    h = request.headers.get("Authorization")
+    if not h or not h.startswith("Bearer "):
+        return None
+    return decode_token(h[7:].strip())
+
+
+def password_set():
+    """POST /api/auth/password/set { password, confirm_password } 需登录"""
+    data = request.get_json(silent=True) or {}
+    password = data.get("password") or ""
+    confirm = data.get("confirm_password") or ""
+    user_id = _current_user_id()
+    if user_id is None:
+        return jsonify({"error": "请先登录"}), 401
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "用户不存在"}), 404
+    if getattr(user, "password_set", False):
+        return jsonify({"error": "密码已设置，如需修改请使用修改密码功能"}), 400
+    if password != confirm:
+        return jsonify({"error": "两次输入的密码不一致"}), 400
+    if len(password) < 6:
+        return jsonify({"error": "密码长度至少6位"}), 400
+    user.set_password(password)
+    db.session.commit()
+    return jsonify({"message": "密码设置成功"})
+
+
+def password_change_sms():
+    """POST /api/auth/password/change { old_password, new_password, confirm_password } 需登录（与 2Vision 一致）"""
+    data = request.get_json(silent=True) or {}
+    old_pwd = data.get("old_password") or ""
+    new_pwd = data.get("new_password") or ""
+    confirm = data.get("confirm_password") or ""
+    user_id = _current_user_id()
+    if user_id is None:
+        return jsonify({"error": "请先登录"}), 401
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "用户不存在"}), 404
+    if not getattr(user, "password_set", False):
+        return jsonify({"error": "请先设置密码"}), 400
+    if not user.check_password(old_pwd):
+        return jsonify({"error": "原密码错误"}), 400
+    if new_pwd != confirm:
+        return jsonify({"error": "两次输入的密码不一致"}), 400
+    if len(new_pwd) < 6:
+        return jsonify({"error": "新密码至少6位"}), 400
+    user.set_password(new_pwd)
+    db.session.commit()
+    return jsonify({"message": "密码修改成功"})
+
+
+def password_status():
+    """GET /api/auth/password/status 需登录，返回是否已设置密码、手机号"""
+    user_id = _current_user_id()
+    if user_id is None:
+        return jsonify({"error": "请先登录"}), 401
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "用户不存在"}), 404
+    return jsonify({
+        "password_set": getattr(user, "password_set", False),
+        "phone": getattr(user, "phone", None),
+    })

@@ -252,16 +252,53 @@
     }
   }
 
+  var _authPendingPhone = null;
+  var _authPendingCode = null;
+
+  function setAuthLoginMethod(method) {
+    var formCode = document.getElementById('authFormCode');
+    var formPwd = document.getElementById('authFormPassword');
+    var subs = document.querySelectorAll('.auth-step[data-auth-step="verify"] .auth-subtab');
+    if (method === 'password') {
+      if (formCode) formCode.style.display = 'none';
+      if (formPwd) formPwd.style.display = '';
+      subs.forEach(function (s, i) { s.classList.toggle('is-active', (s.getAttribute('data-auth-login-method') === 'password')); });
+    } else {
+      if (formCode) formCode.style.display = '';
+      if (formPwd) formPwd.style.display = 'none';
+      subs.forEach(function (s, i) { s.classList.toggle('is-active', (s.getAttribute('data-auth-login-method') === 'code')); });
+    }
+    showAuthHint('');
+  }
+
   function openAuthModal() {
     var modal = document.getElementById('authModal');
     if (modal) { modal.setAttribute('aria-hidden', 'false'); modal.classList.add('is-visible'); }
+    _authPendingPhone = null;
+    _authPendingCode = null;
+    showAuthStep('verify');
+    setAuthLoginMethod('code');
     showAuthHint('');
+    var titleEl = document.getElementById('authModalTitle');
+    if (titleEl) titleEl.textContent = '登录';
   }
   function closeAuthModal() {
     var modal = document.getElementById('authModal');
     if (modal) {
       if (document.activeElement && modal.contains(document.activeElement)) document.activeElement.blur();
       modal.setAttribute('aria-hidden', 'true'); modal.classList.remove('is-visible');
+    }
+    showAuthStep('verify');
+  }
+  function showAuthStep(step) {
+    var verifyEl = document.getElementById('authStepVerify');
+    var setProfileEl = document.getElementById('authStepSetProfile');
+    if (step === 'verify') {
+      if (verifyEl) verifyEl.style.display = '';
+      if (setProfileEl) setProfileEl.style.display = 'none';
+    } else {
+      if (verifyEl) verifyEl.style.display = 'none';
+      if (setProfileEl) setProfileEl.style.display = '';
     }
   }
   function showAuthHint(text, isError) {
@@ -273,57 +310,30 @@
     el.classList.toggle('modal-hint-ok', !isError && !!text);
   }
 
-  function setAuthTab(tab) {
-    var loginPanel = document.getElementById('authPanelLogin');
-    var registerPanel = document.getElementById('authPanelRegister');
-    var tabLogin = document.getElementById('authTabLogin');
-    var tabRegister = document.getElementById('authTabRegister');
-    var titleEl = document.getElementById('authModalTitle');
-    if (tab === 'login') {
-      if (loginPanel) loginPanel.style.display = '';
-      if (registerPanel) registerPanel.style.display = 'none';
-      if (tabLogin) { tabLogin.classList.add('is-active'); tabLogin.setAttribute('aria-selected', 'true'); }
-      if (tabRegister) { tabRegister.classList.remove('is-active'); tabRegister.setAttribute('aria-selected', 'false'); }
-      if (titleEl) titleEl.textContent = '登录';
-    } else {
-      if (loginPanel) loginPanel.style.display = 'none';
-      if (registerPanel) registerPanel.style.display = '';
-      if (tabLogin) { tabLogin.classList.remove('is-active'); tabLogin.setAttribute('aria-selected', 'false'); }
-      if (tabRegister) { tabRegister.classList.add('is-active'); tabRegister.setAttribute('aria-selected', 'true'); }
-      if (titleEl) titleEl.textContent = '注册';
-    }
-    showAuthHint('');
-  }
-  function setLoginMethod(method) {
-    var formPwd = document.getElementById('authFormLoginPassword');
-    var formCode = document.getElementById('authFormLoginCode');
-    var subs = document.querySelectorAll('.auth-login-method .auth-subtab');
-    if (method === 'password') {
-      if (formPwd) formPwd.style.display = '';
-      if (formCode) formCode.style.display = 'none';
-      if (subs.length >= 1) { subs[0].classList.add('is-active'); if (subs[1]) subs[1].classList.remove('is-active'); }
-    } else {
-      if (formPwd) formPwd.style.display = 'none';
-      if (formCode) formCode.style.display = '';
-      if (subs.length >= 2) { subs[1].classList.add('is-active'); if (subs[0]) subs[0].classList.remove('is-active'); }
-    }
-    showAuthHint('');
+  function startSmsCountdown(btn, seconds) {
+    var orig = btn.textContent;
+    var left = seconds;
+    btn.disabled = true;
+    var t = setInterval(function () {
+      left--;
+      btn.textContent = left > 0 ? left + ' 秒后重发' : orig;
+      if (left <= 0) { clearInterval(t); btn.disabled = false; }
+    }, 1000);
   }
 
-  async function authSendCode(email, hintOnFail, sendCodeBtn) {
+  async function authSendSmsCode(phone, hintOnFail, sendCodeBtn) {
+    phone = (phone || '').trim().replace(/\s|-/g, '');
+    if (!/^1\d{10}$/.test(phone)) { showAuthHint('请输入以1开头的11位手机号', true); return false; }
     var origText = (sendCodeBtn && sendCodeBtn.textContent) || '获取验证码';
     showAuthHint('正在发送验证码…', false);
-    if (sendCodeBtn) {
-      sendCodeBtn.disabled = true;
-      sendCodeBtn.textContent = '发送中…';
-    }
+    if (sendCodeBtn) { sendCodeBtn.disabled = true; sendCodeBtn.textContent = '发送中…'; }
     try {
-      var res = await fetch(API_BASE + '/api/auth/send-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email }) });
+      var res = await fetch(API_BASE + '/api/auth/sms/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: phone }) });
       var json = await res.json().catch(function () { return {}; });
       if (res.ok) {
-        showAuthHint('验证码已发送，请查收邮箱（含垃圾邮件文件夹）', false);
-        showGlobalHint('验证码已发送至 ' + email + '，请查收。');
-        if (sendCodeBtn) { sendCodeBtn.disabled = false; sendCodeBtn.textContent = origText; }
+        showAuthHint('验证码已发送，请查收短信', false);
+        showGlobalHint('验证码已发送。');
+        if (sendCodeBtn) startSmsCountdown(sendCodeBtn, 60);
         return true;
       }
       showAuthHint(json.error || '发送失败', true);
@@ -335,68 +345,86 @@
       return false;
     }
   }
-  async function onRegisterSubmit() {
-    var email = (document.getElementById('regEmail') && document.getElementById('regEmail').value || '').trim().toLowerCase();
-    var code = (document.getElementById('regCode') && document.getElementById('regCode').value || '').trim();
-    var username = (document.getElementById('regUsername') && document.getElementById('regUsername').value || '').trim();
-    var password = document.getElementById('regPassword') && document.getElementById('regPassword').value || '';
-    var confirm = document.getElementById('regPasswordConfirm') && document.getElementById('regPasswordConfirm').value || '';
-    if (!email) { showAuthHint('请填写邮箱', true); return; }
+
+  async function onAuthSubmitCode() {
+    var phone = (document.getElementById('authPhone') && document.getElementById('authPhone').value || '').trim().replace(/\s|-/g, '');
+    var code = (document.getElementById('authCode') && document.getElementById('authCode').value || '').trim();
+    if (!/^1\d{10}$/.test(phone)) { showAuthHint('请输入以1开头的11位手机号', true); return; }
     if (!code) { showAuthHint('请填写验证码', true); return; }
-    if (!username) { showAuthHint('请填写用户名', true); return; }
-    if (password.length < 6) { showAuthHint('密码至少 6 位', true); return; }
-    if (password !== confirm) { showAuthHint('两次密码不一致', true); return; }
     try {
-      var res = await fetch(API_BASE + '/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email, code: code, username: username, password: password }) });
+      var res = await fetch(API_BASE + '/api/auth/sms/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: phone, code: code }) });
       var json = await res.json().catch(function () { return {}; });
-      if (!res.ok) { showAuthHint(json.error || '注册失败', true); return; }
+      if (!res.ok) { showAuthHint(json.error || '验证失败', true); return; }
+      if (json.access_token) {
+        setToken(json.access_token);
+        currentUser = json.user;
+        closeAuthModal();
+        updateAuthUI();
+        showGlobalHint('登录成功。');
+        await loadQuota();
+        updateUsageUI();
+        return;
+      }
+      if (json.need_register) {
+        _authPendingPhone = phone;
+        _authPendingCode = code;
+        showAuthStep('set-profile');
+        var titleEl = document.getElementById('authModalTitle');
+        if (titleEl) titleEl.textContent = '设置用户名和密码';
+        showAuthHint('请设置用户名和密码完成注册', false);
+        return;
+      }
+      showAuthHint('请重试', true);
+    } catch (e) {
+      showAuthHint('网络错误，请稍后重试', true);
+    }
+  }
+
+  async function onAuthPasswordLogin() {
+    var phone = (document.getElementById('authPasswordPhone') && document.getElementById('authPasswordPhone').value || '').trim().replace(/\s|-/g, '');
+    var password = document.getElementById('authPassword') && document.getElementById('authPassword').value || '';
+    if (!/^1\d{10}$/.test(phone)) { showAuthHint('请输入以1开头的11位手机号', true); return; }
+    if (!password) { showAuthHint('请填写密码', true); return; }
+    try {
+      var res = await fetch(API_BASE + '/api/auth/password/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: phone, password: password }) });
+      var json = await res.json().catch(function () { return {}; });
+      if (!res.ok) { showAuthHint(json.error || '登录失败', true); return; }
       setToken(json.access_token);
       currentUser = json.user;
       closeAuthModal();
       updateAuthUI();
-      showGlobalHint('注册成功，已自动为您登录。');
+      showGlobalHint('登录成功。');
       await loadQuota();
       updateUsageUI();
     } catch (e) {
       showAuthHint('网络错误，请稍后重试', true);
     }
   }
-  async function onLoginSubmit() {
-    var login = (document.getElementById('loginLogin') && document.getElementById('loginLogin').value || '').trim();
-    var password = document.getElementById('loginPassword') && document.getElementById('loginPassword').value || '';
-    if (!login || !password) { showAuthHint('请填写用户名/邮箱和密码', true); return; }
+
+  async function onAuthCompleteRegister() {
+    if (!_authPendingPhone || !_authPendingCode) { showAuthHint('会话已过期，请关闭后重新获取验证码', true); return; }
+    var username = (document.getElementById('authNewUsername') && document.getElementById('authNewUsername').value || '').trim();
+    var password = document.getElementById('authNewPassword') && document.getElementById('authNewPassword').value || '';
+    var passwordConfirm = document.getElementById('authNewPasswordConfirm') && document.getElementById('authNewPasswordConfirm').value || '';
+    if (!username) { showAuthHint('请填写用户名', true); return; }
+    if (!password) { showAuthHint('请设置密码', true); return; }
+    if (password.length < 6) { showAuthHint('密码至少 6 位', true); return; }
+    if (password !== passwordConfirm) { showAuthHint('两次输入的密码不一致', true); return; }
     try {
-      var res = await fetch(API_BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: login, password: password }) });
+      var res = await fetch(API_BASE + '/api/auth/sms/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username, phone: _authPendingPhone, code: _authPendingCode, password: password })
+      });
       var json = await res.json().catch(function () { return {}; });
-      if (!res.ok) { showAuthHint(json.error || '登录失败', true); return; }
+      if (!res.ok) { showAuthHint(json.error || '注册失败', true); return; }
       setToken(json.access_token);
       currentUser = json.user;
-      var pwdEl = document.getElementById('loginPassword');
-      if (pwdEl) pwdEl.value = '';
-      await loadQuota();
       closeAuthModal();
       updateAuthUI();
-      showGlobalHint('登录成功。');
-    } catch (e) {
-      showAuthHint('网络错误，请稍后重试', true);
-    }
-  }
-  async function onLoginByCodeSubmit() {
-    var email = (document.getElementById('loginCodeEmail') && document.getElementById('loginCodeEmail').value || '').trim().toLowerCase();
-    var code = (document.getElementById('loginCode') && document.getElementById('loginCode').value || '').trim();
-    if (!email || !code) { showAuthHint('请填写邮箱和验证码', true); return; }
-    try {
-      var res = await fetch(API_BASE + '/api/auth/login-by-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email, code: code }) });
-      var json = await res.json().catch(function () { return {}; });
-      if (!res.ok) { showAuthHint(json.error || '登录失败', true); return; }
-      setToken(json.access_token);
-      currentUser = json.user;
-      var pwdEl = document.getElementById('loginPassword');
-      if (pwdEl) pwdEl.value = '';
+      showGlobalHint('注册成功，已自动登录。');
       await loadQuota();
-      closeAuthModal();
-      updateAuthUI();
-      showGlobalHint('登录成功。');
+      updateUsageUI();
     } catch (e) {
       showAuthHint('网络错误，请稍后重试', true);
     }
@@ -1383,6 +1411,8 @@
           username: currentUser.username,
           email: currentUser.email || '',
           nickname: currentUser.nickname || currentUser.username,
+          phone: currentUser.phone || null,
+          password_set: currentUser.password_set || false,
           created_at: currentUser.created_at != null ? currentUser.created_at : null,
           avatar: currentUser.avatar || null,
           quota: stateQuota ? { encrypt: stateQuota.encrypt, unlock: stateQuota.unlock, compress: stateQuota.compress } : null
@@ -1392,6 +1422,7 @@
     if (!json) return;
     set('profileUsername', json.username);
     set('profileEmail', json.email || '');
+    setText('profilePhone', json.phone || '—');
     set('profileNickname', json.nickname || json.username);
     var avatarImg = document.getElementById('profileAvatarImg');
     var avatarEmoji = document.getElementById('profileAvatarEmoji');
@@ -1592,7 +1623,7 @@
       visitsBody.innerHTML = '';
       (d.recent_visits || []).forEach(function (r) {
         var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + (r.created_at || '-').slice(0, 19) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || '-') + '</td><td>' + (r.username || '-') + '</td>';
+        tr.innerHTML = '<td>' + (r.created_at || '-').slice(0, 19) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || '-') + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td>';
         visitsBody.appendChild(tr);
       });
     }
@@ -1601,7 +1632,7 @@
       usageBody.innerHTML = '';
       (d.recent_usage || []).forEach(function (r) {
         var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + (r.created_at || '-').slice(0, 19) + '</td><td>' + (r.username || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
+        tr.innerHTML = '<td>' + (r.created_at || '-').slice(0, 19) + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
         usageBody.appendChild(tr);
       });
     }
@@ -1628,7 +1659,7 @@
     tbody.innerHTML = '';
     (json.data || []).forEach(function (r) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + (r.created_at || r.time || '-').slice(0, 19) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || r.path || '-') + '</td><td>' + (r.username || r.user_id || '-') + '</td>';
+      tr.innerHTML = '<td>' + (r.created_at || r.time || '-').slice(0, 19) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || r.path || '-') + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td>';
       tbody.appendChild(tr);
     });
     var pager = document.getElementById('adminAccessPager');
@@ -1643,7 +1674,7 @@
     tbody.innerHTML = '';
     (json.data || []).forEach(function (r) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + (r.created_at || r.time || '-').slice(0, 19) + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
+      tr.innerHTML = '<td>' + (r.created_at || r.time || '-').slice(0, 19) + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
       tbody.appendChild(tr);
     });
     var pager = document.getElementById('adminUsagePager');
@@ -1811,7 +1842,7 @@
     (json.data || []).forEach(function (u) {
       var q = u.quota || {};
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + u.id + '</td><td>' + (u.nickname || u.username) + '</td><td>' + (u.email || '') + '</td><td>' + (q.encrypt != null ? q.encrypt : '-') + '</td><td>' + (q.unlock != null ? q.unlock : '-') + '</td><td>' + (q.compress != null ? q.compress : '-') + '</td><td>' + (u.created_at || '').slice(0, 19) + '</td>';
+      tr.innerHTML = '<td>' + u.id + '</td><td>' + (u.nickname || u.username) + '</td><td>' + (u.email || '-') + '</td><td>' + (u.phone || '-') + '</td><td>' + (u.password_set ? '是' : '否') + '</td><td>' + (q.encrypt != null ? q.encrypt : '-') + '</td><td>' + (q.unlock != null ? q.unlock : '-') + '</td><td>' + (q.compress != null ? q.compress : '-') + '</td><td>' + (u.created_at || '').slice(0, 19) + '</td>';
       tbody.appendChild(tr);
     });
     var pager = document.getElementById('adminUsersPager');
@@ -1826,7 +1857,7 @@
     tbody.innerHTML = '';
     (json.data || []).forEach(function (p) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + p.id + '</td><td>' + (p.username || p.user_id) + '</td><td>' + (p.pack_type || '') + '</td><td>' + p.quantity + '</td><td>' + p.amount + '</td><td>' + p.status + '</td><td>' + (p.created_at || '').slice(0, 19) + '</td>';
+      tr.innerHTML = '<td>' + p.id + '</td><td>' + (p.username || p.user_id) + '</td><td>' + (p.phone || '-') + '</td><td>' + (p.pack_type || '') + '</td><td>' + p.quantity + '</td><td>' + p.amount + '</td><td>' + p.status + '</td><td>' + (p.created_at || '').slice(0, 19) + '</td>';
       tbody.appendChild(tr);
     });
     var pager = document.getElementById('adminPaymentsPager');
@@ -1851,8 +1882,6 @@
   if (dropdownChangePassword) dropdownChangePassword.addEventListener('click', openChangePasswordModal);
   if (dropdownLogout) dropdownLogout.addEventListener('click', function () {
     clearToken();
-    var pwdEl = document.getElementById('loginPassword');
-    if (pwdEl) pwdEl.value = '';
     updateAuthUI();
     updateUsageUI();
     showGlobalHint('已退出登录。');
@@ -1939,34 +1968,25 @@
   if (authModalCancel) authModalCancel.addEventListener('click', closeAuthModal);
   if (authModalEl) authModalEl.addEventListener('click', function (e) { if (e.target === authModalEl) closeAuthModal(); });
 
-  var authTabLogin = document.getElementById('authTabLogin');
-  var authTabRegister = document.getElementById('authTabRegister');
-  if (authTabLogin) authTabLogin.addEventListener('click', function () { setAuthTab('login'); });
-  if (authTabRegister) authTabRegister.addEventListener('click', function () { setAuthTab('register'); });
-
-  var loginMethodSubs = document.querySelectorAll('.auth-panel[data-auth-panel="login"] .auth-subtab');
-  if (loginMethodSubs.length >= 1) loginMethodSubs[0].addEventListener('click', function () { setLoginMethod('password'); });
-  if (loginMethodSubs.length >= 2) loginMethodSubs[1].addEventListener('click', function () { setLoginMethod('code'); });
-
-  var btnRegSendCode = document.getElementById('btnRegSendCode');
-  var btnLoginSendCode = document.getElementById('btnLoginSendCode');
-  if (btnRegSendCode) btnRegSendCode.addEventListener('click', function () {
-    var email = (document.getElementById('regEmail') && document.getElementById('regEmail').value || '').trim().toLowerCase();
-    if (!email) { showAuthHint('请先填写邮箱', true); return; }
-    authSendCode(email, true, btnRegSendCode);
-  });
-  if (btnLoginSendCode) btnLoginSendCode.addEventListener('click', function () {
-    var email = (document.getElementById('loginCodeEmail') && document.getElementById('loginCodeEmail').value || '').trim().toLowerCase();
-    if (!email) { showAuthHint('请先填写邮箱', true); return; }
-    authSendCode(email, true, btnLoginSendCode);
+  var authLoginMethodSubs = document.querySelectorAll('.auth-step[data-auth-step="verify"] .auth-subtab');
+  authLoginMethodSubs.forEach(function (btn) {
+    btn.addEventListener('click', function () { setAuthLoginMethod(btn.getAttribute('data-auth-login-method') || 'code'); });
   });
 
-  var btnRegisterSubmit = document.getElementById('btnRegisterSubmit');
-  var btnLoginSubmit = document.getElementById('btnLoginSubmit');
-  var btnLoginByCodeSubmit = document.getElementById('btnLoginByCodeSubmit');
-  if (btnRegisterSubmit) btnRegisterSubmit.addEventListener('click', onRegisterSubmit);
-  if (btnLoginSubmit) btnLoginSubmit.addEventListener('click', onLoginSubmit);
-  if (btnLoginByCodeSubmit) btnLoginByCodeSubmit.addEventListener('click', onLoginByCodeSubmit);
+  var authSendCodeBtn = document.getElementById('authSendCode');
+  if (authSendCodeBtn) authSendCodeBtn.addEventListener('click', function () {
+    var phone = (document.getElementById('authPhone') && document.getElementById('authPhone').value || '').trim().replace(/\s|-/g, '');
+    authSendSmsCode(phone, true, authSendCodeBtn);
+  });
+
+  var authSubmitCodeBtn = document.getElementById('authSubmitCode');
+  if (authSubmitCodeBtn) authSubmitCodeBtn.addEventListener('click', onAuthSubmitCode);
+
+  var authSubmitPasswordBtn = document.getElementById('authSubmitPassword');
+  if (authSubmitPasswordBtn) authSubmitPasswordBtn.addEventListener('click', onAuthPasswordLogin);
+
+  var authCompleteRegisterBtn = document.getElementById('authCompleteRegister');
+  if (authCompleteRegisterBtn) authCompleteRegisterBtn.addEventListener('click', onAuthCompleteRegister);
 
   async function initAuth() {
     if (getToken()) {

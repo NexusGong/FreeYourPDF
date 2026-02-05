@@ -33,24 +33,29 @@ MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DAYS = 7
 
-# SMTP（发验证码）
+# SMTP（仅用于告警邮件等，如 alert_email 支付宝 Cookie 过期通知）
 SMTP_HOST = os.environ.get('SMTP_HOST')
 SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
 SMTP_USER = os.environ.get('SMTP_USER')
 SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD')
 SMTP_USE_TLS = os.environ.get('SMTP_USE_TLS', 'true').lower() in ('1', 'true', 'yes')
 
-# 验证码
-CODE_EXPIRE_MINUTES = 10
-CODE_COOLDOWN_SECONDS = 60  # 同一邮箱 60 秒内不重复发
+# 短信验证码（与 2Vision 一致：手机号登录/注册）
+SMS_CODE_EXPIRE_MINUTES = 1
+SMS_SEND_INTERVAL_SECONDS = 60
+SMS_ENABLED = os.environ.get('SMS_ENABLED', 'false').lower() in ('1', 'true', 'yes')
+SMS_ACCOUNT = os.environ.get('SMS_ACCOUNT', '').strip()
+SMS_PASSWORD = os.environ.get('SMS_PASSWORD', '').strip()
+SMS_TEMPLATE_ID = os.environ.get('SMS_TEMPLATE_ID', '1').strip()
+SMS_API_URL = os.environ.get('SMS_API_URL', 'https://api.ihuyi.com/sms/Submit.json').strip()
 
-# 默认配额：登录用户 10 次，未登录（匿名）5 次
-DEFAULT_QUOTA_ENCRYPT = 10
-DEFAULT_QUOTA_UNLOCK = 10
-DEFAULT_QUOTA_COMPRESS = 10
-DEFAULT_QUOTA_ANONYMOUS_ENCRYPT = 5
-DEFAULT_QUOTA_ANONYMOUS_UNLOCK = 5
-DEFAULT_QUOTA_ANONYMOUS_COMPRESS = 5
+# 默认配额：登录用户 20 次，未登录（匿名）10 次
+DEFAULT_QUOTA_ENCRYPT = 20
+DEFAULT_QUOTA_UNLOCK = 20
+DEFAULT_QUOTA_COMPRESS = 20
+DEFAULT_QUOTA_ANONYMOUS_ENCRYPT = 10
+DEFAULT_QUOTA_ANONYMOUS_UNLOCK = 10
+DEFAULT_QUOTA_ANONYMOUS_COMPRESS = 10
 
 # 用户名规则
 USERNAME_MIN_LEN = 2
