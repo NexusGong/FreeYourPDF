@@ -2259,6 +2259,19 @@
   document.addEventListener('click', function () { closeUserDropdown(); });
   var authUserWrap = document.getElementById('authUserWrap');
   if (authUserWrap) authUserWrap.addEventListener('click', function (e) { e.stopPropagation(); });
+  
+  // 移动端优化：点击下拉菜单项后自动关闭菜单
+  var dropdownItems = document.querySelectorAll('.auth-dropdown-item');
+  dropdownItems.forEach(function(item) {
+    item.addEventListener('click', function() {
+      // 移动端延迟关闭，确保点击事件完成
+      if (window.matchMedia('(max-width: 768px)').matches) {
+        setTimeout(function() {
+          closeUserDropdown();
+        }, 100);
+      }
+    });
+  });
 
   var dropdownProfile = document.getElementById('dropdownProfile');
   var dropdownRecharge = document.getElementById('dropdownRecharge');
