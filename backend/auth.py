@@ -127,25 +127,29 @@ def sms_send():
 
 
 def sms_register():
-    """POST /api/auth/sms/register { username, phone, code [, password ] } -> token + user（新用户验证码通过后设置用户名和密码）"""
+    """POST /api/auth/sms/register { username, phone, code, password } -> token + user（新用户验证码通过后设置用户名和密码，密码为必填）"""
     import sms as sms_module
     data = request.get_json(silent=True) or {}
     phone = (data.get("phone") or "").strip().replace(" ", "").replace("-", "")
     username = (data.get("username") or "").strip()
     code = (data.get("code") or "").strip()
-    password = (data.get("password") or "").strip() or None
+    password = (data.get("password") or "").strip()
     if not sms_module.is_valid_phone(phone):
         return jsonify({"error": "手机号格式不正确"}), 400
     if not sms_module.verify_sms_code(phone, code, consume=True):
         return jsonify({"error": "验证码错误或已过期"}), 400
     if _get_user_by_phone(phone):
         return jsonify({"error": "该手机号已被注册"}), 400
+    if not username:
+        return jsonify({"error": "用户名不能为空"}), 400
     ok, err = _validate_username(username)
     if not ok:
         return jsonify({"error": err}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "用户名已存在"}), 400
-    if password and len(password) < 6:
+    if not password:
+        return jsonify({"error": "密码不能为空"}), 400
+    if len(password) < 6:
         return jsonify({"error": "密码至少 6 位"}), 400
     user = _create_user_by_phone(username, phone, password=password)
     token = _make_token(user.id)
@@ -204,20 +208,25 @@ def sms_login():
 
 
 def password_login():
-    """POST /api/auth/password/login { phone, password } -> token"""
+    """POST /api/auth/password/login { username, password } -> token（支持用户名或手机号登录）"""
     import sms as sms_module
     data = request.get_json(silent=True) or {}
-    phone = (data.get("phone") or "").strip().replace(" ", "").replace("-", "")
+    username = (data.get("username") or "").strip()
     password = data.get("password") or ""
-    if not sms_module.is_valid_phone(phone):
-        return jsonify({"error": "手机号格式不正确"}), 400
-    user = _get_user_by_phone(phone)
+    if not username:
+        return jsonify({"error": "请输入用户名"}), 400
+    if not password:
+        return jsonify({"error": "请输入密码"}), 400
+    # 优先按用户名查找，如果用户名是手机号格式则也支持按手机号查找
+    user = User.query.filter_by(username=username).first()
+    if not user and sms_module.is_valid_phone(username):
+        user = _get_user_by_phone(username)
     if not user:
-        return jsonify({"error": "该手机号未注册"}), 404
+        return jsonify({"error": "用户名或密码错误"}), 401
     if not getattr(user, "password_set", False):
         return jsonify({"error": "该账号未设置密码，请使用验证码登录"}), 400
     if not user.check_password(password):
-        return jsonify({"error": "密码错误"}), 401
+        return jsonify({"error": "用户名或密码错误"}), 401
     token = _make_token(user.id)
     return jsonify({
         "access_token": token,

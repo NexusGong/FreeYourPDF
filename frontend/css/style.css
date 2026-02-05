@@ -534,11 +534,51 @@ body[data-glow-level="2"] .glow-level-dot { background: var(--primary); opacity:
   display: flex;
   gap: var(--space-sm);
   margin-bottom: var(--space-sm);
+  align-items: stretch;
 }
 
 .input-row .input {
   flex: 1;
   min-width: 0;
+}
+
+.input-row .btn-secondary {
+  height: auto;
+  min-height: 0;
+  padding: 0.65rem 1rem !important;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.5;
+  box-sizing: border-box;
+  font-size: 0.95rem;
+  border-width: 1px;
+  margin: 0;
+}
+
+/* 输入框内嵌按钮（手机号输入框 + 获取验证码按钮） */
+.input-with-button {
+  position: relative;
+  margin-bottom: var(--space-sm);
+}
+
+.input-with-button .input {
+  width: 100%;
+  padding-right: 100px;
+}
+
+.input-inline-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: calc(100% - 8px);
+  padding: 0 0.85rem !important;
+  margin: 0;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  font-size: 0.9rem;
 }
 
 .btn-block {

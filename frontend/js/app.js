@@ -341,8 +341,12 @@
 
   async function authSendSmsCode(phone, hintOnFail, sendCodeBtn) {
     phone = (phone || '').trim().replace(/\s|-/g, '');
-    if (!/^1\d{10}$/.test(phone)) { showAuthHint('请输入以1开头的11位手机号', true); return false; }
     var origText = (sendCodeBtn && sendCodeBtn.textContent) || '获取验证码';
+    if (!/^1\d{10}$/.test(phone)) {
+      showAuthHint('请输入以1开头的11位手机号', true);
+      if (sendCodeBtn) { sendCodeBtn.disabled = false; sendCodeBtn.textContent = origText; }
+      return false;
+    }
     showAuthHint('正在发送验证码…', false);
     if (sendCodeBtn) { sendCodeBtn.disabled = true; sendCodeBtn.textContent = '发送中…'; }
     try {
@@ -361,6 +365,11 @@
       if (hintOnFail) showAuthHint('网络错误，请稍后重试', true);
       if (sendCodeBtn) { sendCodeBtn.disabled = false; sendCodeBtn.textContent = origText; }
       return false;
+    } finally {
+      if (sendCodeBtn && sendCodeBtn.disabled && sendCodeBtn.textContent === '发送中…') {
+        sendCodeBtn.disabled = false;
+        sendCodeBtn.textContent = origText;
+      }
     }
   }
 
@@ -399,12 +408,12 @@
   }
 
   async function onAuthPasswordLogin() {
-    var phone = (document.getElementById('authPasswordPhone') && document.getElementById('authPasswordPhone').value || '').trim().replace(/\s|-/g, '');
+    var username = (document.getElementById('authPasswordUsername') && document.getElementById('authPasswordUsername').value || '').trim();
     var password = document.getElementById('authPassword') && document.getElementById('authPassword').value || '';
-    if (!/^1\d{10}$/.test(phone)) { showAuthHint('请输入以1开头的11位手机号', true); return; }
+    if (!username) { showAuthHint('请输入用户名', true); return; }
     if (!password) { showAuthHint('请填写密码', true); return; }
     try {
-      var res = await fetch(API_BASE + '/api/auth/password/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: phone, password: password }) });
+      var res = await fetch(API_BASE + '/api/auth/password/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: username, password: password }) });
       var json = await res.json().catch(function () { return {}; });
       if (!res.ok) { showAuthHint(json.error || '登录失败', true); return; }
       setToken(json.access_token);
