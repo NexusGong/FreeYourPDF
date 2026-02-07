@@ -1938,9 +1938,15 @@
   }
   async function loadAdminMonitor() {
     var res = await fetchWithAuth(API_BASE + '/api/admin/monitor/realtime');
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.error('[FreeYourPDF] loadAdminMonitor 请求失败:', res.status, res.statusText);
+      return;
+    }
     var json = await res.json();
+    console.log('[FreeYourPDF] loadAdminMonitor 收到数据:', json);
     var d = json.data || {};
+    console.log('[FreeYourPDF] loadAdminMonitor 访问记录数量:', d.recent_visits ? d.recent_visits.length : 'undefined', d.recent_visits);
+    console.log('[FreeYourPDF] loadAdminMonitor 使用记录数量:', d.recent_usage ? d.recent_usage.length : 'undefined', d.recent_usage);
     var el;
     if (el = document.getElementById('adminMonitorUsage1h')) el.textContent = d.recent_usage_1h != null ? d.recent_usage_1h : 0;
     if (el = document.getElementById('adminMonitorUsage24h')) el.textContent = d.recent_usage_24h != null ? d.recent_usage_24h : 0;
@@ -1950,11 +1956,13 @@
     if (visitsBody) {
       visitsBody.innerHTML = '';
       var visits = d.recent_visits || [];
+      console.log('[FreeYourPDF] loadAdminMonitor 准备渲染访问记录，数量:', visits.length);
       if (visits.length === 0) {
         visitsBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">暂无最近访问记录</td></tr>';
       } else {
-        visits.forEach(function (r) {
+        visits.forEach(function (r, index) {
           try {
+            console.log('[FreeYourPDF] loadAdminMonitor 渲染访问记录', index, r);
             var tr = document.createElement('tr');
             tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || '-') + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td>';
             visitsBody.appendChild(tr);
@@ -1963,6 +1971,8 @@
           }
         });
       }
+    } else {
+      console.error('[FreeYourPDF] loadAdminMonitor 找不到 adminMonitorRecentVisitsBody 元素');
     }
     var usageBody = document.getElementById('adminMonitorRecentUsageBody');
     if (usageBody) {
