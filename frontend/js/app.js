@@ -1889,20 +1889,18 @@
       if (mainPage) mainPage.style.display = '';
       if (adminPage) adminPage.style.display = 'none';
       if (adminForbidden) adminForbidden.style.display = 'none';
-      if (window._adminMonitorTimer) { clearInterval(window._adminMonitorTimer); window._adminMonitorTimer = null; }
     }
   }
   window.applyAdminRoute = applyAdminRoute;
   function switchAdminTab(tab) {
     document.querySelectorAll('.admin-page-tab').forEach(function (t) { t.classList.toggle('is-active', t.getAttribute('data-admin-tab') === tab); });
     document.querySelectorAll('.admin-page-main .admin-panel').forEach(function (p) { p.style.display = p.getAttribute('data-admin-panel') === tab ? '' : 'none'; });
-    if (tab !== 'monitor' && window._adminMonitorTimer) { clearInterval(window._adminMonitorTimer); window._adminMonitorTimer = null; }
     if (tab === 'users') loadAdminUsers();
     if (tab === 'payments') loadAdminPayments();
     if (tab === 'access') loadAdminAccessLogs();
     if (tab === 'usage') loadAdminUsageLogs();
-    if (tab === 'monitor') { loadAdminMonitor(); if (!window._adminMonitorTimer) window._adminMonitorTimer = setInterval(loadAdminMonitor, 5000); }
     if (tab === 'cost') loadAdminCost();
+    if (tab === 'overview') loadAdminStats();
   }
   async function loadAdminStats() {
     var res = await fetchWithAuth(API_BASE + '/api/admin/stats');
@@ -1915,6 +1913,10 @@
     if (el = document.getElementById('adminStatRevenue')) el.textContent = d.total_revenue != null ? d.total_revenue : 0;
     if (el = document.getElementById('adminStatVisits')) el.textContent = d.total_visits != null ? d.total_visits : 0;
     if (el = document.getElementById('adminStatUsageCount')) el.textContent = d.total_usage_count != null ? d.total_usage_count : 0;
+    if (el = document.getElementById('adminStatUsage1h')) el.textContent = d.recent_usage_1h != null ? d.recent_usage_1h : 0;
+    if (el = document.getElementById('adminStatUsage24h')) el.textContent = d.recent_usage_24h != null ? d.recent_usage_24h : 0;
+    if (el = document.getElementById('adminStatVisits1h')) el.textContent = d.recent_visits_1h != null ? d.recent_visits_1h : 0;
+    if (el = document.getElementById('adminStatVisits24h')) el.textContent = d.recent_visits_24h != null ? d.recent_visits_24h : 0;
     var trend = d.usage_trend || [];
     var tbody = document.getElementById('adminUsageTrendBody');
     if (tbody) {
@@ -1935,17 +1937,6 @@
         visitTbody.appendChild(tr);
       });
     }
-  }
-  async function loadAdminMonitor() {
-    var res = await fetchWithAuth(API_BASE + '/api/admin/monitor/realtime');
-    if (!res.ok) return;
-    var json = await res.json();
-    var d = json.data || {};
-    var el;
-    if (el = document.getElementById('adminMonitorUsage1h')) el.textContent = d.recent_usage_1h != null ? d.recent_usage_1h : 0;
-    if (el = document.getElementById('adminMonitorUsage24h')) el.textContent = d.recent_usage_24h != null ? d.recent_usage_24h : 0;
-    if (el = document.getElementById('adminMonitorVisits1h')) el.textContent = d.recent_visits_1h != null ? d.recent_visits_1h : 0;
-    if (el = document.getElementById('adminMonitorVisits24h')) el.textContent = d.recent_visits_24h != null ? d.recent_visits_24h : 0;
   }
   async function loadAdminCost() {
     var res = await fetchWithAuth(API_BASE + '/api/admin/stats');

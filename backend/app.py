@@ -58,9 +58,8 @@ with app.app_context():
         cur.close()
         conn.close()
     except Exception as e:
-        import sys
-        print('[FreeYourPDF] usage_record 表补列:', e, flush=True)
-        sys.stdout.flush()
+        # 表结构补列失败不影响功能，静默处理
+        pass
 
     # 为已有 user 表补全 phone、password_set（与 2Vision 一致的手机号登录）
     try:
@@ -75,9 +74,8 @@ with app.app_context():
         cur.close()
         conn.close()
     except Exception as e:
-        import sys
-        print('[FreeYourPDF] user 表补列:', e, flush=True)
-        sys.stdout.flush()
+        # 表结构补列失败不影响功能，静默处理
+        pass
 
     # 启动时自动创建或提升初始管理员（Render 等线上环境配置 INITIAL_ADMIN_PHONE + INITIAL_ADMIN_PASSWORD）
     def _ensure_initial_admin():
@@ -95,17 +93,18 @@ with app.app_context():
                 if password:
                     u.set_password(password)
                 db.session.commit()
-                print('[FreeYourPDF] 初始管理员：已将已有用户（手机号 %s***）提升为管理员' % phone[:3], flush=True)
+                # 初始管理员提升成功，静默处理
+                pass
             return
         if u:
             u.is_admin = True
             if password:
                 u.set_password(password)
             db.session.commit()
-            print('[FreeYourPDF] 初始管理员：已将已有用户（手机号 %s***）提升为管理员' % phone[:3], flush=True)
+            # 初始管理员提升成功，静默处理
             return
         if not password:
-            print('[FreeYourPDF] 初始管理员：未配置 INITIAL_ADMIN_PASSWORD，无法自动创建新管理员账号', flush=True)
+            # 未配置密码，静默处理
             return
         base_username = (username_cfg or 'admin')[:32] or 'admin'
         username = base_username
@@ -136,12 +135,13 @@ with app.app_context():
         )
         db.session.add(quota)
         db.session.commit()
-        print('[FreeYourPDF] 初始管理员：已自动创建管理员账号（手机号 %s***，用户名 %s）' % (phone[:3], new_user.username), flush=True)
+        # 初始管理员创建成功，静默处理
 
     try:
         _ensure_initial_admin()
     except Exception as e:
-        print('[FreeYourPDF] 初始管理员执行失败: %s' % e, flush=True)
+        # 初始管理员创建失败，只记录错误（不影响启动）
+        _log_error('初始管理员创建', e)
         try:
             db.session.rollback()
         except Exception:
@@ -203,10 +203,9 @@ def _cors_preflight():
 
 
 def _log(msg):
-    """调试用：后端 console 输出，便于排查 401 等。"""
-    import sys
-    print('[FreeYourPDF]', msg, flush=True)
-    sys.stdout.flush()
+    """调试用：后端 console 输出，便于排查 401 等。生产环境已禁用，只保留错误日志。"""
+    # 生产环境不输出调试日志，减少日志噪音
+    pass
 
 
 def _log_error(operation, error, details=None):
@@ -270,13 +269,11 @@ def _get_current_user_id(silent=False):
     """
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        if not silent:
-            _log('认证失败：缺少或无效的 Authorization')
+        # 生产环境不输出认证失败日志，减少日志噪音
         return None
     token = auth_header[7:].strip()
     user_id = auth_module.decode_token(token)
-    if user_id is None:
-        _log('认证失败：JWT 无效或已过期')
+    # 生产环境不输出认证失败日志，减少日志噪音
     return user_id
 
 
@@ -1295,8 +1292,8 @@ def api_admin_payments():
                     'completed_at': p.completed_at.isoformat() + 'Z' if p.completed_at else None,
                 })
             except Exception as e:
-                print('[FreeYourPDF] api_admin_payments 处理单条记录异常:', str(e), flush=True)
-                # 即使单条记录出错，也继续处理其他记录
+                # 单条记录处理失败，继续处理其他记录，静默处理
+                pass
                 out.append({
                     'id': p.id,
                     'user_id': p.user_id,
@@ -1313,17 +1310,14 @@ def api_admin_payments():
                 })
         return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
     except Exception as e:
-        import traceback
         err_msg = '获取支付记录失败：' + str(e)
-        print('[FreeYourPDF] api_admin_payments 异常:', err_msg, flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.stdout.flush()
+        _log_error('获取支付记录', e)
         return jsonify({'status': 'error', 'error': err_msg}), 500
 
 
 @app.route('/api/admin/stats', methods=['GET'])
 def api_admin_stats():
-    """数据概览：用户、支付、收入、访问量、使用量、近 7 日趋势。"""
+    """数据概览：用户、支付、收入、访问量、使用量、近 1h/24h 统计、近 7 日趋势。"""
     admin_user, err = _require_admin()
     if err is not None:
         return err[0], err[1]
@@ -1333,6 +1327,20 @@ def api_admin_stats():
     revenue = db.session.query(func.sum(Payment.amount)).filter(Payment.status == 'completed').scalar() or 0
     total_visits = PageVisit.query.count()
     total_usage_count = UsageRecord.query.count()
+    
+    # 近 1h/24h 统计
+    now = datetime.utcnow()
+    last_1h = now - timedelta(hours=1)
+    last_24h = now - timedelta(hours=24)
+    try:
+        recent_usage_1h = UsageRecord.query.filter(UsageRecord.created_at >= last_1h).count()
+        recent_usage_24h = UsageRecord.query.filter(UsageRecord.created_at >= last_24h).count()
+        recent_visits_1h = PageVisit.query.filter(PageVisit.created_at >= last_1h).count()
+        recent_visits_24h = PageVisit.query.filter(PageVisit.created_at >= last_24h).count()
+        except Exception as e:
+            # 统计查询失败，使用默认值，静默处理
+            recent_usage_1h = recent_usage_24h = recent_visits_1h = recent_visits_24h = 0
+    
     # 近 7 日使用趋势（按天）
     usage_trend = []
     today = datetime.utcnow().date()
@@ -1365,47 +1373,14 @@ def api_admin_stats():
             'total_cost': 0,
             'total_visits': total_visits,
             'total_usage_count': total_usage_count,
+            'recent_usage_1h': recent_usage_1h,
+            'recent_usage_24h': recent_usage_24h,
+            'recent_visits_1h': recent_visits_1h,
+            'recent_visits_24h': recent_visits_24h,
             'usage_trend': usage_trend,
             'visit_trend': visit_trend,
         },
     })
-
-
-@app.route('/api/admin/monitor/realtime', methods=['GET'])
-def api_admin_monitor_realtime():
-    """实时监控：近 1h/24h 使用量和访问量统计。"""
-    try:
-        admin_user, err = _require_admin()
-        if err is not None:
-            return err[0], err[1]
-        now = datetime.utcnow()
-        last_1h = now - timedelta(hours=1)
-        last_24h = now - timedelta(hours=24)
-        try:
-            recent_usage_1h = UsageRecord.query.filter(UsageRecord.created_at >= last_1h).count()
-            recent_usage_24h = UsageRecord.query.filter(UsageRecord.created_at >= last_24h).count()
-            recent_visits_1h = PageVisit.query.filter(PageVisit.created_at >= last_1h).count()
-            recent_visits_24h = PageVisit.query.filter(PageVisit.created_at >= last_24h).count()
-        except Exception as e:
-            print('[FreeYourPDF] api_admin_monitor_realtime 统计查询异常:', str(e), flush=True)
-            recent_usage_1h = recent_usage_24h = recent_visits_1h = recent_visits_24h = 0
-        
-        return jsonify({
-            'status': 'success',
-            'data': {
-                'recent_usage_1h': recent_usage_1h,
-                'recent_usage_24h': recent_usage_24h,
-                'recent_visits_1h': recent_visits_1h,
-                'recent_visits_24h': recent_visits_24h,
-            },
-        })
-    except Exception as e:
-        import traceback
-        err_msg = '获取实时监控数据失败：' + str(e)
-        print('[FreeYourPDF] api_admin_monitor_realtime 异常:', err_msg, flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.stdout.flush()
-        return jsonify({'status': 'error', 'error': err_msg}), 500
 
 
 @app.route('/api/admin/access-logs', methods=['GET'])
@@ -1422,18 +1397,12 @@ def api_admin_access_logs():
         try:
             total = q.count()
         except Exception as e:
-            print('[FreeYourPDF] api_admin_access_logs count 异常:', str(e), flush=True)
-            import traceback
-            traceback.print_exc(file=sys.stdout)
-            sys.stdout.flush()
+            _log_error('访问记录统计', e)
             total = 0
         try:
             items = q.offset(offset).limit(page_size).all()
         except Exception as e:
-            print('[FreeYourPDF] api_admin_access_logs query 异常:', str(e), flush=True)
-            import traceback
-            traceback.print_exc(file=sys.stdout)
-            sys.stdout.flush()
+            _log_error('访问记录查询', e)
             items = []
         out = []
         for v in items:
@@ -1463,8 +1432,8 @@ def api_admin_access_logs():
                     'user_agent': (v.user_agent[:80] + '…') if v.user_agent and len(v.user_agent) > 80 else (v.user_agent or '—'),
                 })
             except Exception as e:
-                print('[FreeYourPDF] api_admin_access_logs 处理单条记录异常:', str(e), flush=True)
-                # 即使单条记录出错，也继续处理其他记录
+                # 单条记录处理失败，继续处理其他记录，静默处理
+                pass
                 out.append({
                     'id': v.id,
                     'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
@@ -1479,11 +1448,8 @@ def api_admin_access_logs():
                 })
         return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
     except Exception as e:
-        import traceback
         err_msg = '获取访问记录失败：' + str(e)
-        print('[FreeYourPDF] api_admin_access_logs 异常:', err_msg, flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.stdout.flush()
+        _log_error('获取访问记录', e)
         return jsonify({'status': 'error', 'error': err_msg}), 500
 
 
@@ -1501,12 +1467,12 @@ def api_admin_usage_logs():
         try:
             total = q.count()
         except Exception as e:
-            print('[FreeYourPDF] api_admin_usage_logs count 异常:', str(e), flush=True)
+            _log_error('使用记录统计', e)
             total = 0
         try:
             items = q.offset(offset).limit(page_size).all()
         except Exception as e:
-            print('[FreeYourPDF] api_admin_usage_logs query 异常:', str(e), flush=True)
+            _log_error('使用记录查询', e)
             items = []
         out = []
         for r in items:
@@ -1534,8 +1500,8 @@ def api_admin_usage_logs():
                     'location': _format_location(getattr(r, 'country', None), getattr(r, 'region', None), getattr(r, 'city', None)),
                 })
             except Exception as e:
-                print('[FreeYourPDF] api_admin_usage_logs 处理单条记录异常:', str(e), flush=True)
-                # 即使单条记录出错，也继续处理其他记录
+                # 单条记录处理失败，继续处理其他记录，静默处理
+                pass
                 out.append({
                     'id': r.id,
                     'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
@@ -1550,11 +1516,8 @@ def api_admin_usage_logs():
                 })
         return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
     except Exception as e:
-        import traceback
         err_msg = '获取使用记录失败：' + str(e)
-        print('[FreeYourPDF] api_admin_usage_logs 异常:', err_msg, flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.stdout.flush()
+        _log_error('获取使用记录', e)
         return jsonify({'status': 'error', 'error': err_msg}), 500
 
 
@@ -1869,11 +1832,8 @@ def api_unlock():
             download_name=(f.filename or 'output.pdf').replace('.pdf', '_unlocked.pdf')
         )
     except Exception as e:
-        import traceback
         err_msg = '解锁失败：' + str(e)
-        print('[FreeYourPDF] 解锁异常:', err_msg, flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.stdout.flush()
+        _log_error('解锁', e)
         return jsonify({'error': err_msg}), 400
 
 
@@ -2016,8 +1976,6 @@ def _compress_pdf_with_ghostscript(data, quality='/ebook'):
         if proc.returncode != 0 or not os.path.exists(out_path):
             stderr_msg = proc.stderr.decode('utf-8', errors='ignore')[:500] if proc.stderr else ''
             err_detail = 'returncode=%d, stderr=%s' % (proc.returncode, stderr_msg)
-            print('[FreeYourPDF] Ghostscript 压缩失败:', err_detail, flush=True)
-            sys.stdout.flush()
             raise RuntimeError('ghostscript compress failed: %s' % (stderr_msg or proc.returncode))
         with open(out_path, 'rb') as f_out:
             out_bytes = f_out.read()
@@ -2096,8 +2054,8 @@ def api_encrypt():
                         perms = _json.loads(perms_json)
                         allow = _pikepdf_permissions(perms)
                     except Exception as perm_err:
-                        print('[FreeYourPDF] 加密：解析权限 JSON 失败:', str(perm_err), flush=True)
-                        sys.stdout.flush()
+                        # 权限解析失败，使用默认权限，静默处理
+                        pass
                 if user_password:
                     # 打开需要密码：user 与 owner 同密码，用该密码打开即拥有全部权限
                     enc = pikepdf.Encryption(user=user_password, owner=user_password, R=4, allow=allow)
@@ -2111,13 +2069,8 @@ def api_encrypt():
                 # 清理内存
                 del pdf, stream_in
                 _cleanup_memory()
-                
-                print('[FreeYourPDF] 加密：pikepdf 加密成功', flush=True)
             except Exception as pikepdf_err:
-                print('[FreeYourPDF] 加密：pikepdf 失败，回退到 pypdf:', str(pikepdf_err), flush=True)
-                import traceback
-                traceback.print_exc(file=sys.stdout)
-                sys.stdout.flush()
+                # pikepdf 失败时静默回退到 pypdf，不输出日志
                 use_pikepdf = False
                 out = None
         if out is None:
@@ -2154,11 +2107,8 @@ def api_encrypt():
             download_name=base_name + '_encrypted.pdf',
         )
     except Exception as e:
-        import traceback
         err_msg = '加密失败：' + str(e)
-        print('[FreeYourPDF] 加密异常:', err_msg, flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.stdout.flush()
+        _log_error('加密', e)
         return jsonify({'error': err_msg}), 400
 
 
@@ -2217,7 +2167,6 @@ def api_compress():
             
             # 如果压缩效果不好（减少<5%），尝试更激进的 /screen 压缩
             if compression_ratio > 0.95:
-                print('[FreeYourPDF] 体积优化：/ebook 压缩效果不佳（%.1f%%），尝试 /screen 压缩' % (compression_ratio * 100), flush=True)
                 try:
                     compressed_bytes_screen = _compress_pdf_with_ghostscript(data, quality='/screen')
                     compression_ratio_screen = len(compressed_bytes_screen) / original_size if original_size > 0 else 1.0
@@ -2226,19 +2175,15 @@ def api_compress():
                         compressed_bytes = compressed_bytes_screen
                         compression_method = 'ghostscript_screen'
                         compression_ratio = compression_ratio_screen
-                        print('[FreeYourPDF] 体积优化：/screen 压缩效果更好（%.1f%%）' % (compression_ratio * 100), flush=True)
-                except Exception as screen_err:
-                    print('[FreeYourPDF] 体积优化：/screen 压缩失败，使用 /ebook 结果:', str(screen_err), flush=True)
+                except Exception:
+                    # /screen 压缩失败，使用 /ebook 结果，静默处理
+                    pass
             
             # 清理内存
             del data, stream
             _cleanup_memory()
-            
-            print('[FreeYourPDF] 体积优化：Ghostscript 压缩成功，原始大小 %d 字节，压缩后 %d 字节，压缩率 %.1f%%' % 
-                  (original_size, len(compressed_bytes), compression_ratio * 100), flush=True)
         except Exception as gs_err:
-            print('[FreeYourPDF] 体积优化：Ghostscript 不可用或失败，回退到 pypdf 结构优化:', str(gs_err), flush=True)
-            sys.stdout.flush()
+            # Ghostscript 不可用或失败，静默回退到 pypdf
             # 2) Ghostscript 不可用或失败时，退回到 pypdf 结构优化（无损或轻微压缩）
             stream2 = io.BytesIO(data)
             with _suppress_pdf_warnings():
@@ -2258,8 +2203,6 @@ def api_compress():
                 _cleanup_memory()
                 
                 compression_ratio = len(compressed_bytes) / original_size if original_size > 0 else 1.0
-                print('[FreeYourPDF] 体积优化：pypdf 结构优化完成，原始大小 %d 字节，压缩后 %d 字节，压缩率 %.1f%%' % 
-                      (original_size, len(compressed_bytes), compression_ratio * 100), flush=True)
         
         # 检查压缩效果，如果效果很差（减少<1%），在响应头中添加提示
         compression_ratio = len(compressed_bytes) / original_size if original_size > 0 else 1.0
@@ -2283,11 +2226,8 @@ def api_compress():
         
         return response
     except Exception as e:
-        import traceback
         err_msg = '体积优化失败：' + str(e)
-        print('[FreeYourPDF] 体积优化异常:', err_msg, flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.stdout.flush()
+        _log_error('体积优化', e)
         return jsonify({'error': err_msg}), 400
 
 
@@ -2399,7 +2339,6 @@ def api_crack_and_unlock():
                         # 尝试访问第一页内容来验证解密是否真的成功
                         test_page = reader.pages[0]
                         # 如果能访问页面，说明解密成功
-                        print('[FreeYourPDF] 暴力破解成功：密码 "%s"（尝试 %d/%d）' % (pwd, idx + 1, total), flush=True)
                         
                         # 生成解锁后的 PDF
                         writer = PdfWriter()
@@ -2439,16 +2378,12 @@ def api_crack_and_unlock():
             
             # 所有密码都尝试完毕，未成功
             err_msg = '未能破解密码（已尝试 %d 个密码）' % idx
-            print('[FreeYourPDF] 暴力破解失败：%s' % err_msg, flush=True)
-            sys.stdout.flush()
             
             # 失败不扣次数，发送失败消息
             yield f"data: {json.dumps({'type': 'error', 'message': err_msg, 'attempts': idx})}\n\n"
             
         except Exception as e:
             err_msg = '暴力破解过程出错：' + str(e)
-            print('[FreeYourPDF] 暴力破解失败：%s' % err_msg, flush=True)
-            sys.stdout.flush()
             yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
     
     return Response(
@@ -2469,12 +2404,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, '..', 'frontend'))
 
 
-# 启动时确认关键路由已注册（仅在实际对外服务的进程中打印，避免 reloader 双进程重复）
+# 启动时确认关键路由已注册（生产环境静默处理，减少日志噪音）
 if os.environ.get('WERKZEUG_RUN_MAIN', 'true') != 'false':
-    with app.app_context():
-        _rules = [r.rule for r in app.url_map.iter_rules() if r.rule.startswith('/api/')]
-        _key = [x for x in _rules if 'payment' in x or 'user' in x]
-        print('[FreeYourPDF] 服务就绪，API 已加载（支付/用户等 %s 个路由）' % len(_key), flush=True)
+    # 路由已注册，静默处理
+    pass
 
 # 收款码静态图（白名单，仅允许以下文件名）
 PAYMENT_QR_FILENAMES = {'alipay-10-0.99.png', 'alipay-60-4.99.png', 'alipay-110-9.99.png'}

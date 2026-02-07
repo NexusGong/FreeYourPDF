@@ -324,7 +324,6 @@
       <button type="button" class="admin-page-tab" data-admin-tab="access">访问记录</button>
       <button type="button" class="admin-page-tab" data-admin-tab="users">用户管理</button>
       <button type="button" class="admin-page-tab" data-admin-tab="usage">使用记录</button>
-      <button type="button" class="admin-page-tab" data-admin-tab="monitor">实时监控</button>
       <button type="button" class="admin-page-tab" data-admin-tab="payments">支付记录</button>
       <button type="button" class="admin-page-tab" data-admin-tab="payment-test">支付测试</button>
       <button type="button" class="admin-page-tab" data-admin-tab="cost">成本监控</button>
@@ -339,6 +338,10 @@
           <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatRevenue">0</span><span class="admin-stat-label">总收入（元）</span></div>
           <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatVisits">0</span><span class="admin-stat-label">总访问量</span></div>
           <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatUsageCount">0</span><span class="admin-stat-label">总使用次数</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatUsage1h">0</span><span class="admin-stat-label">近 1h 使用次数</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatUsage24h">0</span><span class="admin-stat-label">近 24h 使用次数</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatVisits1h">0</span><span class="admin-stat-label">近 1h 访问量</span></div>
+          <div class="admin-stat-card"><span class="admin-stat-value" id="adminStatVisits24h">0</span><span class="admin-stat-label">近 24h 访问量</span></div>
         </div>
         <h3 class="admin-subtitle">近 7 日使用趋势</h3>
         <div class="admin-trend-wrap" id="adminUsageTrendWrap"><table class="admin-table admin-trend-table"><thead><tr><th>日期</th><th>使用次数</th></tr></thead><tbody id="adminUsageTrendBody"></tbody></table></div>
@@ -409,17 +412,6 @@
         <h2 class="admin-section-title">使用记录</h2>
         <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>用户</th><th>手机号</th><th>类型</th><th>IP</th><th>位置</th></tr></thead><tbody id="adminUsageBody"></tbody></table></div>
         <p class="admin-pager" id="adminUsagePager">暂无数据</p>
-      </div>
-      <div class="admin-panel" id="adminPanelMonitor" data-admin-panel="monitor" style="display:none;">
-        <h2 class="admin-section-title">实时监控</h2>
-        <p class="admin-section-desc">近 1 小时 / 24 小时指标（每 5 秒自动刷新）</p>
-        <div class="admin-stats-cards" id="adminMonitorCards">
-          <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorUsage1h">0</span><span class="admin-stat-label">近 1h 使用次数</span></div>
-          <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorUsage24h">0</span><span class="admin-stat-label">近 24h 使用次数</span></div>
-          <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorVisits1h">0</span><span class="admin-stat-label">近 1h 访问量</span></div>
-          <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorVisits24h">0</span><span class="admin-stat-label">近 24h 访问量</span></div>
-        </div>
-        <p class="admin-monitor-tip">每 5 秒自动刷新</p>
       </div>
       <div class="admin-panel" id="adminPanelPayments" data-admin-panel="payments" style="display:none;">
         <h2 class="admin-section-title">支付记录</h2>
