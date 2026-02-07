@@ -620,17 +620,19 @@ def api_visit():
     记录一次页面访问（公开，可选 session_id），含 IP 与地理位置。
     优化：先快速写入数据库（不等待地理位置查询），然后异步更新地理位置信息。
     """
-    data = request.get_json(silent=True) or {}
-    session_id = (data.get('session_id') or '').strip() or None
-    if session_id and len(session_id) > 100:
-        session_id = session_id[:100]
-    # 访问记录允许匿名，这里静默解析 JWT，避免未登录时刷屏日志
-    user_id = _get_current_user_id(silent=True)
-    ip = _get_client_ip()
-    ua = request.headers.get('User-Agent') or ''
-    parsed = _parse_device(ua)
-    
     try:
+        data = request.get_json(silent=True) or {}
+        session_id = (data.get('session_id') or '').strip() or None
+        if session_id and len(session_id) > 100:
+            session_id = session_id[:100]
+        # 访问记录允许匿名，这里静默解析 JWT，避免未登录时刷屏日志
+        user_id = _get_current_user_id(silent=True)
+        ip = _get_client_ip()
+        ua = request.headers.get('User-Agent') or ''
+        parsed = _parse_device(ua)
+        
+        print('[FreeYourPDF] api_visit 收到访问记录请求: user_id=%s, session_id=%s, ip=%s' % (user_id, session_id[:20] if session_id else None, ip), flush=True)
+        
         # 先快速创建记录（不等待地理位置查询）
         visit = PageVisit(
             session_id=session_id,
@@ -651,6 +653,7 @@ def api_visit():
         
         # 提交记录（快速响应）
         db.session.commit()
+        print('[FreeYourPDF] api_visit 访问记录已写入数据库: visit_id=%d' % visit_id, flush=True)
         
         # 异步更新地理位置信息（不阻塞响应）
         def _update_geo(geo):
@@ -679,13 +682,15 @@ def api_visit():
         
     except Exception as e:
         _log_error('记录访问失败', e, {
-            'user_id': user_id,
-            'session_id': session_id
+            'user_id': user_id if 'user_id' in locals() else None,
+            'session_id': session_id if 'session_id' in locals() else None
         })
         try:
             db.session.rollback()
         except Exception:
             pass
+        # 即使失败也返回成功，避免前端重复请求
+        return jsonify({'status': 'ok', 'message': '访问记录失败（已记录日志）'}), 200
     
     return jsonify({'status': 'ok', 'message': '访问已记录'})
 
@@ -1501,13 +1506,21 @@ def api_admin_access_logs():
         q = PageVisit.query.order_by(PageVisit.created_at.desc())
         try:
             total = q.count()
+            print('[FreeYourPDF] api_admin_access_logs 查询到总数: %d' % total, flush=True)
         except Exception as e:
             print('[FreeYourPDF] api_admin_access_logs count 异常:', str(e), flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stdout)
+            sys.stdout.flush()
             total = 0
         try:
             items = q.offset(offset).limit(page_size).all()
+            print('[FreeYourPDF] api_admin_access_logs 查询到 %d 条记录（offset=%d, limit=%d）' % (len(items), offset, page_size), flush=True)
         except Exception as e:
             print('[FreeYourPDF] api_admin_access_logs query 异常:', str(e), flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stdout)
+            sys.stdout.flush()
             items = []
         out = []
         for v in items:

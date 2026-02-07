@@ -2543,11 +2543,22 @@
   initAuth();
 
   function recordVisit() {
-    if (!API_BASE) return;
+    if (!API_BASE) {
+      console.log('[FreeYourPDF] recordVisit 跳过（API_BASE为空）');
+      return;
+    }
+    console.log('[FreeYourPDF] recordVisit 开始记录访问');
     fetchWithAuth(API_BASE + '/api/visit', {
       method: 'POST',
       body: { session_id: getAnonymousId() }
-    }).catch(function () {});
+    }).then(function (res) {
+      console.log('[FreeYourPDF] recordVisit 响应:', res.status, res.statusText);
+      return res.json().then(function (json) {
+        console.log('[FreeYourPDF] recordVisit 结果:', json);
+      });
+    }).catch(function (e) {
+      console.error('[FreeYourPDF] recordVisit 失败:', e);
+    });
   }
   recordVisit();
 
