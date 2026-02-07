@@ -1146,35 +1146,61 @@ def api_admin_user_delete(user_id):
 @app.route('/api/admin/payments', methods=['GET'])
 def api_admin_payments():
     """支付记录列表（分页、状态筛选）。"""
-    admin_user, err = _require_admin()
-    if err is not None:
-        return err[0], err[1]
-    page = max(1, int(request.args.get('page') or 1))
-    page_size = min(50, max(1, int(request.args.get('page_size') or 20)))
-    status_filter = (request.args.get('status') or '').strip()
-    q = Payment.query
-    if status_filter:
-        q = q.filter(Payment.status == status_filter)
-    total = q.count()
-    items = q.order_by(Payment.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
-    out = []
-    for p in items:
-        u = db.session.get(User, p.user_id)
-        out.append({
-            'id': p.id,
-            'user_id': p.user_id,
-            'username': u.username if u else None,
-            'email': u.email if u else None,
-            'phone': getattr(u, 'phone', None) if u else None,
-            'pack_type': p.pack_type,
-            'amount': p.amount,
-            'quantity': p.quantity,
-            'status': p.status,
-            'transaction_id': p.transaction_id,
-            'created_at': p.created_at.isoformat() + 'Z' if p.created_at else None,
-            'completed_at': p.completed_at.isoformat() + 'Z' if p.completed_at else None,
-        })
-    return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
+    try:
+        admin_user, err = _require_admin()
+        if err is not None:
+            return err[0], err[1]
+        page = max(1, int(request.args.get('page') or 1))
+        page_size = min(50, max(1, int(request.args.get('page_size') or 20)))
+        status_filter = (request.args.get('status') or '').strip()
+        q = Payment.query
+        if status_filter:
+            q = q.filter(Payment.status == status_filter)
+        total = q.count()
+        items = q.order_by(Payment.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        out = []
+        for p in items:
+            try:
+                u = db.session.get(User, p.user_id)
+                out.append({
+                    'id': p.id,
+                    'user_id': p.user_id,
+                    'username': u.username if u else None,
+                    'email': u.email if u else None,
+                    'phone': getattr(u, 'phone', None) if u else None,
+                    'pack_type': p.pack_type,
+                    'amount': p.amount,
+                    'quantity': p.quantity,
+                    'status': p.status,
+                    'transaction_id': p.transaction_id,
+                    'created_at': p.created_at.isoformat() + 'Z' if p.created_at else None,
+                    'completed_at': p.completed_at.isoformat() + 'Z' if p.completed_at else None,
+                })
+            except Exception as e:
+                print('[FreeYourPDF] api_admin_payments 处理单条记录异常:', str(e), flush=True)
+                # 即使单条记录出错，也继续处理其他记录
+                out.append({
+                    'id': p.id,
+                    'user_id': p.user_id,
+                    'username': None,
+                    'email': None,
+                    'phone': None,
+                    'pack_type': p.pack_type,
+                    'amount': p.amount,
+                    'quantity': p.quantity,
+                    'status': p.status,
+                    'transaction_id': p.transaction_id,
+                    'created_at': p.created_at.isoformat() + 'Z' if p.created_at else None,
+                    'completed_at': p.completed_at.isoformat() + 'Z' if p.completed_at else None,
+                })
+        return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
+    except Exception as e:
+        import traceback
+        err_msg = '获取支付记录失败：' + str(e)
+        print('[FreeYourPDF] api_admin_payments 异常:', err_msg, flush=True)
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+        return jsonify({'status': 'error', 'error': err_msg}), 500
 
 
 @app.route('/api/admin/stats', methods=['GET'])
@@ -1230,57 +1256,83 @@ def api_admin_stats():
 @app.route('/api/admin/monitor/realtime', methods=['GET'])
 def api_admin_monitor_realtime():
     """实时监控：近 1h/24h 使用量、最近访问与使用记录。"""
-    admin_user, err = _require_admin()
-    if err is not None:
-        return err[0], err[1]
-    now = datetime.utcnow()
-    last_1h = now - timedelta(hours=1)
-    last_24h = now - timedelta(hours=24)
-    recent_usage_1h = UsageRecord.query.filter(UsageRecord.created_at >= last_1h).count()
-    recent_usage_24h = UsageRecord.query.filter(UsageRecord.created_at >= last_24h).count()
-    recent_visits_1h = PageVisit.query.filter(PageVisit.created_at >= last_1h).count()
-    recent_visits_24h = PageVisit.query.filter(PageVisit.created_at >= last_24h).count()
-    # 最近 10 条访问
-    visits = PageVisit.query.order_by(PageVisit.created_at.desc()).limit(10).all()
-    recent_visits = []
-    for v in visits:
-        u = db.session.get(User, v.user_id) if v.user_id else None
-        recent_visits.append({
-            'id': v.id,
-            'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
-            'ip_address': v.ip_address,
-            'location': _format_location(v.country, v.region, v.city),
-            'device_type': v.device_type or 'unknown',
-            'username': u.username if u else ('ID:%s' % v.user_id if v.user_id else '匿名'),
-            'phone': getattr(u, 'phone', None) if u else None,
+    try:
+        admin_user, err = _require_admin()
+        if err is not None:
+            return err[0], err[1]
+        now = datetime.utcnow()
+        last_1h = now - timedelta(hours=1)
+        last_24h = now - timedelta(hours=24)
+        try:
+            recent_usage_1h = UsageRecord.query.filter(UsageRecord.created_at >= last_1h).count()
+            recent_usage_24h = UsageRecord.query.filter(UsageRecord.created_at >= last_24h).count()
+            recent_visits_1h = PageVisit.query.filter(PageVisit.created_at >= last_1h).count()
+            recent_visits_24h = PageVisit.query.filter(PageVisit.created_at >= last_24h).count()
+        except Exception as e:
+            print('[FreeYourPDF] api_admin_monitor_realtime 统计查询异常:', str(e), flush=True)
+            recent_usage_1h = recent_usage_24h = recent_visits_1h = recent_visits_24h = 0
+        # 最近 10 条访问
+        try:
+            visits = PageVisit.query.order_by(PageVisit.created_at.desc()).limit(10).all()
+        except Exception as e:
+            print('[FreeYourPDF] api_admin_monitor_realtime 访问记录查询异常:', str(e), flush=True)
+            visits = []
+        recent_visits = []
+        for v in visits:
+            try:
+                u = db.session.get(User, v.user_id) if v.user_id else None
+                recent_visits.append({
+                    'id': v.id,
+                    'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
+                    'ip_address': v.ip_address,
+                    'location': _format_location(v.country, v.region, v.city),
+                    'device_type': v.device_type or 'unknown',
+                    'username': u.username if u else ('ID:%s' % v.user_id if v.user_id else '匿名'),
+                    'phone': getattr(u, 'phone', None) if u else None,
+                })
+            except Exception as e:
+                print('[FreeYourPDF] api_admin_monitor_realtime 处理单条访问记录异常:', str(e), flush=True)
+        # 最近 10 条使用
+        try:
+            usages = UsageRecord.query.order_by(UsageRecord.created_at.desc()).limit(10).all()
+        except Exception as e:
+            print('[FreeYourPDF] api_admin_monitor_realtime 使用记录查询异常:', str(e), flush=True)
+            usages = []
+        recent_usage = []
+        for r in usages:
+            try:
+                u = db.session.get(User, r.user_id) if r.user_id else None
+                type_label = {'encrypt': '加密', 'unlock': '解锁', 'compress': '体积优化'}.get(r.usage_type, r.usage_type or '—')
+                recent_usage.append({
+                    'id': r.id,
+                    'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
+                    'username': u.username if u else ('ID:%s' % r.user_id if r.user_id else '匿名'),
+                    'phone': getattr(u, 'phone', None) if u else None,
+                    'type': type_label,
+                    'usage_type': r.usage_type,
+                    'ip_address': r.ip_address,
+                    'location': _format_location(getattr(r, 'country', None), getattr(r, 'region', None), getattr(r, 'city', None)),
+                })
+            except Exception as e:
+                print('[FreeYourPDF] api_admin_monitor_realtime 处理单条使用记录异常:', str(e), flush=True)
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'recent_usage_1h': recent_usage_1h,
+                'recent_usage_24h': recent_usage_24h,
+                'recent_visits_1h': recent_visits_1h,
+                'recent_visits_24h': recent_visits_24h,
+                'recent_visits': recent_visits,
+                'recent_usage': recent_usage,
+            },
         })
-    # 最近 10 条使用
-    usages = UsageRecord.query.order_by(UsageRecord.created_at.desc()).limit(10).all()
-    recent_usage = []
-    for r in usages:
-        u = db.session.get(User, r.user_id) if r.user_id else None
-        type_label = {'encrypt': '加密', 'unlock': '解锁', 'compress': '体积优化'}.get(r.usage_type, r.usage_type or '—')
-        recent_usage.append({
-            'id': r.id,
-            'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
-            'username': u.username if u else ('ID:%s' % r.user_id if r.user_id else '匿名'),
-            'phone': getattr(u, 'phone', None) if u else None,
-            'type': type_label,
-            'usage_type': r.usage_type,
-            'ip_address': r.ip_address,
-            'location': _format_location(getattr(r, 'country', None), getattr(r, 'region', None), getattr(r, 'city', None)),
-        })
-    return jsonify({
-        'status': 'success',
-        'data': {
-            'recent_usage_1h': recent_usage_1h,
-            'recent_usage_24h': recent_usage_24h,
-            'recent_visits_1h': recent_visits_1h,
-            'recent_visits_24h': recent_visits_24h,
-            'recent_visits': recent_visits,
-            'recent_usage': recent_usage,
-        },
-    })
+    except Exception as e:
+        import traceback
+        err_msg = '获取实时监控数据失败：' + str(e)
+        print('[FreeYourPDF] api_admin_monitor_realtime 异常:', err_msg, flush=True)
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+        return jsonify({'status': 'error', 'error': err_msg}), 500
 
 
 @app.route('/api/admin/access-logs', methods=['GET'])
@@ -1326,39 +1378,71 @@ def api_admin_access_logs():
 @app.route('/api/admin/usage-logs', methods=['GET'])
 def api_admin_usage_logs():
     """使用记录（分页）。"""
-    admin_user, err = _require_admin()
-    if err is not None:
-        return err[0], err[1]
-    page = max(1, int(request.args.get('page') or 1))
-    page_size = min(50, max(1, int(request.args.get('page_size') or 20)))
-    offset = (page - 1) * page_size
-    q = UsageRecord.query.order_by(UsageRecord.created_at.desc())
-    total = q.count()
-    items = q.offset(offset).limit(page_size).all()
-    out = []
-    for r in items:
-        user_display = None
-        if r.user_id:
-            u = db.session.get(User, r.user_id)
-            user_display = u.username if u else ('ID:%s' % r.user_id)
-            user_phone = getattr(u, 'phone', None) if u else None
-        else:
-            user_display = '匿名'
-            user_phone = None
-        type_label = {'encrypt': '加密', 'unlock': '解锁', 'compress': '体积优化'}.get(r.usage_type, r.usage_type or '—')
-        out.append({
-            'id': r.id,
-            'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
-            'user_id': r.user_id,
-            'username': user_display,
-            'phone': user_phone,
-            'type': type_label,
-            'usage_type': r.usage_type,
-            'api_endpoint': r.api_endpoint,
-            'ip_address': r.ip_address,
-            'location': _format_location(getattr(r, 'country', None), getattr(r, 'region', None), getattr(r, 'city', None)),
-        })
-    return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
+    try:
+        admin_user, err = _require_admin()
+        if err is not None:
+            return err[0], err[1]
+        page = max(1, int(request.args.get('page') or 1))
+        page_size = min(50, max(1, int(request.args.get('page_size') or 20)))
+        offset = (page - 1) * page_size
+        q = UsageRecord.query.order_by(UsageRecord.created_at.desc())
+        try:
+            total = q.count()
+        except Exception as e:
+            print('[FreeYourPDF] api_admin_usage_logs count 异常:', str(e), flush=True)
+            total = 0
+        try:
+            items = q.offset(offset).limit(page_size).all()
+        except Exception as e:
+            print('[FreeYourPDF] api_admin_usage_logs query 异常:', str(e), flush=True)
+            items = []
+        out = []
+        for r in items:
+            try:
+                user_display = None
+                if r.user_id:
+                    u = db.session.get(User, r.user_id)
+                    user_display = u.username if u else ('ID:%s' % r.user_id)
+                    user_phone = getattr(u, 'phone', None) if u else None
+                else:
+                    user_display = '匿名'
+                    user_phone = None
+                type_label = {'encrypt': '加密', 'unlock': '解锁', 'compress': '体积优化'}.get(r.usage_type, r.usage_type or '—')
+                out.append({
+                    'id': r.id,
+                    'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
+                    'user_id': r.user_id,
+                    'username': user_display,
+                    'phone': user_phone,
+                    'type': type_label,
+                    'usage_type': r.usage_type,
+                    'api_endpoint': r.api_endpoint,
+                    'ip_address': r.ip_address,
+                    'location': _format_location(getattr(r, 'country', None), getattr(r, 'region', None), getattr(r, 'city', None)),
+                })
+            except Exception as e:
+                print('[FreeYourPDF] api_admin_usage_logs 处理单条记录异常:', str(e), flush=True)
+                # 即使单条记录出错，也继续处理其他记录
+                out.append({
+                    'id': r.id,
+                    'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
+                    'user_id': r.user_id,
+                    'username': '—',
+                    'phone': None,
+                    'type': '—',
+                    'usage_type': getattr(r, 'usage_type', None),
+                    'api_endpoint': getattr(r, 'api_endpoint', None),
+                    'ip_address': getattr(r, 'ip_address', None),
+                    'location': '—',
+                })
+        return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
+    except Exception as e:
+        import traceback
+        err_msg = '获取使用记录失败：' + str(e)
+        print('[FreeYourPDF] api_admin_usage_logs 异常:', err_msg, flush=True)
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+        return jsonify({'status': 'error', 'error': err_msg}), 500
 
 
 @app.route('/api/admin/payment-test', methods=['POST'])
@@ -1727,6 +1811,8 @@ def _compress_pdf_with_ghostscript(data, quality='/ebook'):
         with open(in_path, 'wb') as f_in:
             f_in.write(data)
         # 参考 https://github.com/theeko74/pdfc 使用的 Ghostscript 参数
+        # 增加超时时间到180秒，支持大文件压缩
+        # 添加更多压缩优化参数
         cmd = [
             'gs',
             '-sDEVICE=pdfwrite',
@@ -1735,10 +1821,48 @@ def _compress_pdf_with_ghostscript(data, quality='/ebook'):
             '-dNOPAUSE',
             '-dQUIET',
             '-dBATCH',
+            '-dDetectDuplicateImages=true',  # 检测并移除重复图片
+            '-dColorImageResolution=150',  # 彩色图片分辨率（/ebook默认150dpi）
+            '-dGrayImageResolution=150',   # 灰度图片分辨率
+            '-dMonoImageResolution=300',    # 单色图片分辨率
+            '-dDownsampleColorImages=true', # 启用彩色图片降采样
+            '-dDownsampleGrayImages=true',  # 启用灰度图片降采样
+            '-dDownsampleMonoImages=false', # 不降采样单色图片（保持清晰度）
+            '-dAutoRotatePages=/None',      # 不自动旋转页面
+            '-dEmbedAllFonts=true',         # 嵌入所有字体
+            '-dSubsetFonts=true',           # 子集化字体（只嵌入使用的字符）
+            '-dCompressFonts=true',         # 压缩字体
+            '-dOptimize=true',              # 优化PDF结构
             f'-sOutputFile={out_path}',
             in_path,
         ]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        # 根据质量级别调整参数
+        if quality == '/screen':
+            # /screen: 72dpi，最大压缩
+            cmd = [
+                'gs',
+                '-sDEVICE=pdfwrite',
+                '-dCompatibilityLevel=1.4',
+                '-dPDFSETTINGS=/screen',
+                '-dNOPAUSE',
+                '-dQUIET',
+                '-dBATCH',
+                '-dDetectDuplicateImages=true',
+                '-dColorImageResolution=72',
+                '-dGrayImageResolution=72',
+                '-dMonoImageResolution=300',
+                '-dDownsampleColorImages=true',
+                '-dDownsampleGrayImages=true',
+                '-dDownsampleMonoImages=false',
+                '-dAutoRotatePages=/None',
+                '-dEmbedAllFonts=true',
+                '-dSubsetFonts=true',
+                '-dCompressFonts=true',
+                '-dOptimize=true',
+                f'-sOutputFile={out_path}',
+                in_path,
+            ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
         if proc.returncode != 0 or not os.path.exists(out_path):
             stderr_msg = proc.stderr.decode('utf-8', errors='ignore')[:500] if proc.stderr else ''
             err_detail = 'returncode=%d, stderr=%s' % (proc.returncode, stderr_msg)
@@ -1930,15 +2054,38 @@ def api_compress():
     if not ok:
         return jsonify({'error': result}), 403
     try:
-        # 1) 尝试用 Ghostscript 进行有损压缩（默认使用 /ebook：150dpi 左右，兼顾质量与体积）
+        original_size = len(data)
+        compressed_bytes = None
+        compression_method = None
+        
+        # 1) 优先尝试用 Ghostscript 进行有损压缩
+        # 先尝试 /ebook（150dpi，平衡质量与体积）
         try:
             compressed_bytes = _compress_pdf_with_ghostscript(data, quality='/ebook')
+            compression_method = 'ghostscript_ebook'
+            compression_ratio = len(compressed_bytes) / original_size if original_size > 0 else 1.0
+            
+            # 如果压缩效果不好（减少<5%），尝试更激进的 /screen 压缩
+            if compression_ratio > 0.95:
+                print('[FreeYourPDF] 体积优化：/ebook 压缩效果不佳（%.1f%%），尝试 /screen 压缩' % (compression_ratio * 100), flush=True)
+                try:
+                    compressed_bytes_screen = _compress_pdf_with_ghostscript(data, quality='/screen')
+                    compression_ratio_screen = len(compressed_bytes_screen) / original_size if original_size > 0 else 1.0
+                    # 如果 /screen 效果更好，使用它
+                    if compression_ratio_screen < compression_ratio:
+                        compressed_bytes = compressed_bytes_screen
+                        compression_method = 'ghostscript_screen'
+                        compression_ratio = compression_ratio_screen
+                        print('[FreeYourPDF] 体积优化：/screen 压缩效果更好（%.1f%%）' % (compression_ratio * 100), flush=True)
+                except Exception as screen_err:
+                    print('[FreeYourPDF] 体积优化：/screen 压缩失败，使用 /ebook 结果:', str(screen_err), flush=True)
             
             # 清理内存
             del data, stream
             _cleanup_memory()
             
-            print('[FreeYourPDF] 体积优化：Ghostscript 压缩成功', flush=True)
+            print('[FreeYourPDF] 体积优化：Ghostscript 压缩成功，原始大小 %d 字节，压缩后 %d 字节，压缩率 %.1f%%' % 
+                  (original_size, len(compressed_bytes), compression_ratio * 100), flush=True)
         except Exception as gs_err:
             print('[FreeYourPDF] 体积优化：Ghostscript 不可用或失败，回退到 pypdf 结构优化:', str(gs_err), flush=True)
             sys.stdout.flush()
@@ -1954,21 +2101,37 @@ def api_compress():
                 writer.write(out_buf)
                 out_buf.seek(0)
                 compressed_bytes = out_buf.getvalue()
+                compression_method = 'pypdf'
                 
                 # 清理内存
                 del reader, writer, out_buf
                 _cleanup_memory()
                 
-                print('[FreeYourPDF] 体积优化：pypdf 结构优化完成，输出大小 %d 字节' % len(compressed_bytes), flush=True)
-
+                compression_ratio = len(compressed_bytes) / original_size if original_size > 0 else 1.0
+                print('[FreeYourPDF] 体积优化：pypdf 结构优化完成，原始大小 %d 字节，压缩后 %d 字节，压缩率 %.1f%%' % 
+                      (original_size, len(compressed_bytes), compression_ratio * 100), flush=True)
+        
+        # 检查压缩效果，如果效果很差（减少<1%），在响应头中添加提示
+        compression_ratio = len(compressed_bytes) / original_size if original_size > 0 else 1.0
+        reduction_pct = (1 - compression_ratio) * 100
+        
         _record_usage(user_id, anonymous_id, 'compress', '/api/compress', 200)
         base_name = (f.filename or 'output.pdf').replace('.pdf', '')
-        return send_file(
+        
+        response = send_file(
             io.BytesIO(compressed_bytes),
             mimetype='application/pdf',
             as_attachment=True,
             download_name=base_name + '_compressed.pdf',
         )
+        
+        # 在响应头中添加压缩信息，前端可以读取并显示
+        response.headers['X-Original-Size'] = str(original_size)
+        response.headers['X-Compressed-Size'] = str(len(compressed_bytes))
+        response.headers['X-Compression-Ratio'] = f'{compression_ratio:.4f}'
+        response.headers['X-Compression-Method'] = compression_method or 'unknown'
+        
+        return response
     except Exception as e:
         import traceback
         err_msg = '体积优化失败：' + str(e)

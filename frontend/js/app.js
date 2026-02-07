@@ -1430,9 +1430,13 @@
           return;
         }
         var blob = await res.blob();
-        var origBytes = item.file.size;
-        var newBytes = blob.size;
+        // 从响应头读取压缩信息（如果后端提供了）
+        var origBytes = parseInt(res.headers.get('X-Original-Size')) || item.file.size;
+        var newBytes = parseInt(res.headers.get('X-Compressed-Size')) || blob.size;
+        var compressionRatio = parseFloat(res.headers.get('X-Compression-Ratio')) || (newBytes / origBytes);
+        var compressionMethod = res.headers.get('X-Compression-Method') || 'unknown';
         var smaller = newBytes < origBytes;
+        var reductionPct = origBytes > 0 ? (100 - (newBytes / origBytes) * 100) : 0;
         var disp = res.headers.get('Content-Disposition') || '';
         var nameMatch = disp.match(/filename\*?=(?:UTF-8'')?"?([^";\n]+)"?/i) || disp.match(/filename="?([^";]+)"?/);
         var outName = (nameMatch && nameMatch[1]) ? decodeURIComponent(nameMatch[1].trim()) : (nameWithoutExt(item.name) + '_compressed.pdf');
@@ -1441,10 +1445,23 @@
         renderFileList();
         var origKb = (origBytes / 1024).toFixed(1);
         var newKb = (newBytes / 1024).toFixed(1);
-        var savedPct = origBytes > 0 ? (100 - (newBytes / origBytes) * 100).toFixed(1) : '0';
-        var hint = smaller
-          ? '体积已优化，请点击「下载」保存。原大小约 <strong>' + origKb + ' KB</strong>，当前约 <strong>' + newKb + ' KB</strong>，较原文件减少约 <strong>' + savedPct + '%</strong>。'
-          : '文件体积已达最优。原大小约 <strong>' + origKb + ' KB</strong>，无需优化。';
+        var savedPct = reductionPct.toFixed(1);
+        
+        // 根据压缩效果给出不同的提示
+        var hint = '';
+        if (!smaller || reductionPct < 1) {
+          // 压缩效果很差（减少<1%）或没有压缩
+          hint = '文件体积优化完成，但效果有限。原大小约 <strong>' + origKb + ' KB</strong>，当前约 <strong>' + newKb + ' KB</strong>，较原文件减少约 <strong>' + savedPct + '%</strong>。';
+          if (reductionPct < 0.5) {
+            hint += '该PDF可能已经过优化，或包含大量文本/矢量图形，压缩空间有限。';
+          }
+        } else if (reductionPct < 5) {
+          // 压缩效果一般（减少1-5%）
+          hint = '体积已优化，请点击「下载」保存。原大小约 <strong>' + origKb + ' KB</strong>，当前约 <strong>' + newKb + ' KB</strong>，较原文件减少约 <strong>' + savedPct + '%</strong>。';
+        } else {
+          // 压缩效果良好（减少>5%）
+          hint = '体积已优化，请点击「下载」保存。原大小约 <strong>' + origKb + ' KB</strong>，当前约 <strong>' + newKb + ' KB</strong>，较原文件减少约 <strong>' + savedPct + '%</strong>。';
+        }
         showGlobalHint(hint);
       } catch (e) {
         console.error(e);
