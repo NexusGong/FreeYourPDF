@@ -2543,11 +2543,13 @@
   initAuth();
 
   function recordVisit() {
-    if (!API_BASE) {
-      console.log('[FreeYourPDF] recordVisit 跳过（API_BASE为空）');
+    // API_BASE 为空字符串时表示同源，这是有效的，不应该跳过
+    // 只有在 API_BASE 为 null 或 undefined 时才跳过
+    if (API_BASE === null || API_BASE === undefined) {
+      console.log('[FreeYourPDF] recordVisit 跳过（API_BASE未定义）');
       return;
     }
-    console.log('[FreeYourPDF] recordVisit 开始记录访问');
+    console.log('[FreeYourPDF] recordVisit 开始记录访问，API_BASE:', API_BASE || '(同源)');
     fetchWithAuth(API_BASE + '/api/visit', {
       method: 'POST',
       body: { session_id: getAnonymousId() }
