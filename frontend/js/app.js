@@ -1879,7 +1879,7 @@
       if (adminForbidden) adminForbidden.style.display = 'none';
       if (isAdmin && adminPage) {
         adminPage.style.display = 'block';
-        loadAdminStats();
+        // 只在切换到对应标签页时才加载数据，避免重复请求
         switchAdminTab(document.querySelector('.admin-page-tab.is-active') ? document.querySelector('.admin-page-tab.is-active').getAttribute('data-admin-tab') : 'overview');
       } else {
         if (adminPage) adminPage.style.display = 'none';
