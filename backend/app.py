@@ -1337,9 +1337,9 @@ def api_admin_stats():
         recent_usage_24h = UsageRecord.query.filter(UsageRecord.created_at >= last_24h).count()
         recent_visits_1h = PageVisit.query.filter(PageVisit.created_at >= last_1h).count()
         recent_visits_24h = PageVisit.query.filter(PageVisit.created_at >= last_24h).count()
-        except Exception as e:
-            # 统计查询失败，使用默认值，静默处理
-            recent_usage_1h = recent_usage_24h = recent_visits_1h = recent_visits_24h = 0
+    except Exception as e:
+        # 统计查询失败，使用默认值，静默处理
+        recent_usage_1h = recent_usage_24h = recent_visits_1h = recent_visits_24h = 0
     
     # 近 7 日使用趋势（按天）
     usage_trend = []
