@@ -1943,34 +1943,74 @@
     if (el = document.getElementById('adminCostProfit')) el.textContent = profit;
   }
   async function loadAdminAccessLogs() {
-    var res = await fetchWithAuth(API_BASE + '/api/admin/access-logs?page=1&page_size=20');
-    if (!res.ok) return;
-    var json = await res.json();
-    var tbody = document.getElementById('adminAccessBody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    (json.data || []).forEach(function (r) {
-      var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + formatLocalTime(r.created_at || r.time) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || r.path || '-') + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td>';
-      tbody.appendChild(tr);
-    });
-    var pager = document.getElementById('adminAccessPager');
-    if (pager) pager.textContent = '共 ' + (json.total || 0) + ' 条';
+    try {
+      var res = await fetchWithAuth(API_BASE + '/api/admin/access-logs?page=1&page_size=20');
+      if (!res.ok) {
+        var errBody = await res.json().catch(function () { return { error: '请求失败：' + res.status }; });
+        console.error('[FreeYourPDF] loadAdminAccessLogs 失败:', errBody);
+        var tbody = document.getElementById('adminAccessBody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">加载失败：' + (errBody.error || '未知错误') + '</td></tr>';
+        var pager = document.getElementById('adminAccessPager');
+        if (pager) pager.textContent = '加载失败';
+        return;
+      }
+      var json = await res.json();
+      var tbody = document.getElementById('adminAccessBody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      if (!json.data || json.data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">暂无访问记录</td></tr>';
+      } else {
+        (json.data || []).forEach(function (r) {
+          var tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + formatLocalTime(r.created_at || r.time) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || r.path || '-') + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td>';
+          tbody.appendChild(tr);
+        });
+      }
+      var pager = document.getElementById('adminAccessPager');
+      if (pager) pager.textContent = '共 ' + (json.total || 0) + ' 条';
+    } catch (e) {
+      console.error('[FreeYourPDF] loadAdminAccessLogs 异常:', e);
+      var tbody = document.getElementById('adminAccessBody');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">加载异常：' + (e.message || '未知错误') + '</td></tr>';
+      var pager = document.getElementById('adminAccessPager');
+      if (pager) pager.textContent = '加载异常';
+    }
   }
   async function loadAdminUsageLogs() {
-    var res = await fetchWithAuth(API_BASE + '/api/admin/usage-logs?page=1&page_size=20');
-    if (!res.ok) return;
-    var json = await res.json();
-    var tbody = document.getElementById('adminUsageBody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    (json.data || []).forEach(function (r) {
-      var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + formatLocalTime(r.created_at || r.time) + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
-      tbody.appendChild(tr);
-    });
-    var pager = document.getElementById('adminUsagePager');
-    if (pager) pager.textContent = '共 ' + (json.total || 0) + ' 条';
+    try {
+      var res = await fetchWithAuth(API_BASE + '/api/admin/usage-logs?page=1&page_size=20');
+      if (!res.ok) {
+        var errBody = await res.json().catch(function () { return { error: '请求失败：' + res.status }; });
+        console.error('[FreeYourPDF] loadAdminUsageLogs 失败:', errBody);
+        var tbody = document.getElementById('adminUsageBody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">加载失败：' + (errBody.error || '未知错误') + '</td></tr>';
+        var pager = document.getElementById('adminUsagePager');
+        if (pager) pager.textContent = '加载失败';
+        return;
+      }
+      var json = await res.json();
+      var tbody = document.getElementById('adminUsageBody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      if (!json.data || json.data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">暂无使用记录</td></tr>';
+      } else {
+        (json.data || []).forEach(function (r) {
+          var tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + formatLocalTime(r.created_at || r.time) + '</td><td>' + (r.username || r.user_id || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
+          tbody.appendChild(tr);
+        });
+      }
+      var pager = document.getElementById('adminUsagePager');
+      if (pager) pager.textContent = '共 ' + (json.total || 0) + ' 条';
+    } catch (e) {
+      console.error('[FreeYourPDF] loadAdminUsageLogs 异常:', e);
+      var tbody = document.getElementById('adminUsageBody');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">加载异常：' + (e.message || '未知错误') + '</td></tr>';
+      var pager = document.getElementById('adminUsagePager');
+      if (pager) pager.textContent = '加载异常';
+    }
   }
 
   var rechargePacksData = [];

@@ -8,6 +8,7 @@ import os
 import sys
 import gc
 import resource
+import threading
 from contextlib import redirect_stderr, redirect_stdout
 from flask import Flask, request, jsonify, send_file, send_from_directory, Response, stream_with_context
 import json
@@ -167,6 +168,14 @@ def _cors(resp):
         resp.headers['Access-Control-Allow-Headers'] = acrh
     else:
         resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, x-anonymous-id'
+    # Cloudflare 兼容性：添加这些头确保 Cloudflare 不会缓存 API 响应
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    # 允许凭据（如果需要）
+    resp.headers['Access-Control-Allow-Credentials'] = 'true'
+    # 暴露自定义响应头（供前端读取）
+    resp.headers['Access-Control-Expose-Headers'] = 'X-Original-Size, X-Compressed-Size, X-Compression-Ratio, X-Compression-Method'
     return resp
 
 
@@ -183,6 +192,12 @@ def _cors_preflight():
             resp.headers['Access-Control-Allow-Headers'] = acrh
         else:
             resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, x-anonymous-id'
+        # Cloudflare 兼容性：确保预检请求不被缓存
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Expires'] = '0'
+        resp.headers['Access-Control-Allow-Credentials'] = 'true'
+        resp.headers['Access-Control-Max-Age'] = '86400'  # 24小时
         return resp
     return None
 
@@ -279,11 +294,12 @@ def _get_client_ip():
     return request.headers.get('X-Real-IP') or (request.remote_addr or 'unknown')
 
 
-def _get_location_from_ip(ip):
+def _get_location_from_ip(ip, timeout=1.5):
     """
     根据 IP 解析地理位置（国家/省/市/时区）。
     使用 ip-api.com 免费接口（45 次/分钟），无 key。
     本地/内网 IP 或失败时返回空字典。
+    优化：缩短超时时间到 1.5 秒，避免阻塞主流程。
     """
     if not ip or ip in ('unknown', '127.0.0.1', 'localhost'):
         return {}
@@ -295,7 +311,8 @@ def _get_location_from_ip(ip):
         from urllib.parse import quote
         url = 'http://ip-api.com/json/%s?fields=status,country,regionName,city,timezone&lang=zh-CN' % quote(ip)
         req = Request(url, headers={'User-Agent': 'FreeYourPDF/1.0'})
-        with urlopen(req, timeout=3) as resp:
+        # 缩短超时时间，避免阻塞上传响应
+        with urlopen(req, timeout=timeout) as resp:
             data = resp.read().decode('utf-8', errors='ignore')
         import json
         obj = json.loads(data) if data else {}
@@ -308,8 +325,24 @@ def _get_location_from_ip(ip):
             'timezone': (obj.get('timezone') or '')[:50],
         }
     except Exception as e:
-        _log('IP 定位异常 %s: %s' % (ip, e))
+        # 静默失败，不打印日志（避免日志刷屏）
         return {}
+
+
+def _get_location_from_ip_async(ip, callback):
+    """
+    异步获取地理位置信息，不阻塞主流程。
+    在后台线程中执行，完成后调用 callback(geo_dict)。
+    """
+    def _fetch():
+        geo = _get_location_from_ip(ip)
+        try:
+            callback(geo)
+        except Exception as e:
+            _log('异步更新地理位置回调失败: %s' % e)
+    
+    thread = threading.Thread(target=_fetch, daemon=True)
+    thread.start()
 
 
 def _format_location(country=None, region=None, city=None):
@@ -353,12 +386,16 @@ def _parse_device(user_agent_str):
 
 
 def _record_usage(user_id, anonymous_id, usage_type, api_endpoint, response_status=200):
-    """记录一次使用（加密/解锁/体积优化），含 IP 与地理位置。"""
+    """
+    记录一次使用（加密/解锁/体积优化），含 IP 与地理位置。
+    优化：先快速写入数据库（不等待地理位置查询），然后异步更新地理位置信息。
+    """
+    ip = _get_client_ip()
+    ua = request.headers.get('User-Agent') or ''
+    parsed = _parse_device(ua)
+    
+    # 先快速创建记录（不等待地理位置查询，避免阻塞上传响应）
     try:
-        ip = _get_client_ip()
-        geo = _get_location_from_ip(ip)
-        ua = request.headers.get('User-Agent') or ''
-        parsed = _parse_device(ua)
         rec = UsageRecord(
             user_id=user_id,
             session_id=anonymous_id,
@@ -367,19 +404,53 @@ def _record_usage(user_id, anonymous_id, usage_type, api_endpoint, response_stat
             api_method=request.method,
             response_status=response_status,
             ip_address=ip,
-            country=geo.get('country'),
-            region=geo.get('region'),
-            city=geo.get('city'),
-            timezone=geo.get('timezone'),
+            country=None,  # 先设为 None，异步更新
+            region=None,
+            city=None,
+            timezone=None,
             user_agent=ua[:500] if ua else None,
             device_type=parsed.get('device_type'),
             browser=parsed.get('browser'),
             os=parsed.get('os'),
         )
         db.session.add(rec)
+        db.session.flush()  # flush 获取 rec.id，但不提交
+        record_id = rec.id
+        
+        # 提交记录（快速响应）
         db.session.commit()
+        
+        # 异步更新地理位置信息（不阻塞响应）
+        def _update_geo(geo):
+            try:
+                # 需要在新的应用上下文中操作数据库
+                with app.app_context():
+                    rec = db.session.get(UsageRecord, record_id)
+                    if rec:
+                        # 只更新非空的地理位置信息
+                        if geo.get('country'):
+                            rec.country = geo.get('country')
+                        if geo.get('region'):
+                            rec.region = geo.get('region')
+                        if geo.get('city'):
+                            rec.city = geo.get('city')
+                        if geo.get('timezone'):
+                            rec.timezone = geo.get('timezone')
+                        db.session.commit()
+                    # 如果记录不存在（可能被删除），静默忽略
+            except Exception as e:
+                # 静默失败，避免日志刷屏（地理位置更新失败不影响主要功能）
+                pass
+        
+        # 异步获取地理位置
+        _get_location_from_ip_async(ip, _update_geo)
+        
     except Exception as e:
-        _log('记录使用量失败: %s' % e)
+        _log_error('记录使用量失败', e, {
+            'user_id': user_id,
+            'usage_type': usage_type,
+            'api_endpoint': api_endpoint
+        })
         try:
             db.session.rollback()
         except Exception:
@@ -545,7 +616,10 @@ def api_password_status():
 
 @app.route('/api/visit', methods=['POST'])
 def api_visit():
-    """记录一次页面访问（公开，可选 session_id），含 IP 与地理位置。"""
+    """
+    记录一次页面访问（公开，可选 session_id），含 IP 与地理位置。
+    优化：先快速写入数据库（不等待地理位置查询），然后异步更新地理位置信息。
+    """
     data = request.get_json(silent=True) or {}
     session_id = (data.get('session_id') or '').strip() or None
     if session_id and len(session_id) > 100:
@@ -553,24 +627,66 @@ def api_visit():
     # 访问记录允许匿名，这里静默解析 JWT，避免未登录时刷屏日志
     user_id = _get_current_user_id(silent=True)
     ip = _get_client_ip()
-    geo = _get_location_from_ip(ip)
     ua = request.headers.get('User-Agent') or ''
     parsed = _parse_device(ua)
-    visit = PageVisit(
-        session_id=session_id,
-        user_id=user_id,
-        ip_address=ip,
-        country=geo.get('country'),
-        region=geo.get('region'),
-        city=geo.get('city'),
-        timezone=geo.get('timezone'),
-        user_agent=ua[:500] if ua else None,
-        device_type=parsed.get('device_type'),
-        browser=parsed.get('browser'),
-        os=parsed.get('os'),
-    )
-    db.session.add(visit)
-    db.session.commit()
+    
+    try:
+        # 先快速创建记录（不等待地理位置查询）
+        visit = PageVisit(
+            session_id=session_id,
+            user_id=user_id,
+            ip_address=ip,
+            country=None,  # 先设为 None，异步更新
+            region=None,
+            city=None,
+            timezone=None,
+            user_agent=ua[:500] if ua else None,
+            device_type=parsed.get('device_type'),
+            browser=parsed.get('browser'),
+            os=parsed.get('os'),
+        )
+        db.session.add(visit)
+        db.session.flush()  # flush 获取 visit.id，但不提交
+        visit_id = visit.id
+        
+        # 提交记录（快速响应）
+        db.session.commit()
+        
+        # 异步更新地理位置信息（不阻塞响应）
+        def _update_geo(geo):
+            try:
+                # 需要在新的应用上下文中操作数据库
+                with app.app_context():
+                    v = db.session.get(PageVisit, visit_id)
+                    if v:
+                        # 只更新非空的地理位置信息
+                        if geo.get('country'):
+                            v.country = geo.get('country')
+                        if geo.get('region'):
+                            v.region = geo.get('region')
+                        if geo.get('city'):
+                            v.city = geo.get('city')
+                        if geo.get('timezone'):
+                            v.timezone = geo.get('timezone')
+                        db.session.commit()
+                    # 如果记录不存在（可能被删除），静默忽略
+            except Exception as e:
+                # 静默失败，避免日志刷屏（地理位置更新失败不影响主要功能）
+                pass
+        
+        # 异步获取地理位置
+        _get_location_from_ip_async(ip, _update_geo)
+        
+    except Exception as e:
+        _log_error('记录访问失败', e, {
+            'user_id': user_id,
+            'session_id': session_id
+        })
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+    
     return jsonify({'status': 'ok', 'message': '访问已记录'})
 
 
@@ -1338,41 +1454,74 @@ def api_admin_monitor_realtime():
 @app.route('/api/admin/access-logs', methods=['GET'])
 def api_admin_access_logs():
     """访问记录（分页）。"""
-    admin_user, err = _require_admin()
-    if err is not None:
-        return err[0], err[1]
-    page = max(1, int(request.args.get('page') or 1))
-    page_size = min(50, max(1, int(request.args.get('page_size') or 20)))
-    offset = (page - 1) * page_size
-    q = PageVisit.query.order_by(PageVisit.created_at.desc())
-    total = q.count()
-    items = q.offset(offset).limit(page_size).all()
-    out = []
-    for v in items:
-        path = v.ip_address or '—'
-        if v.device_type:
-            path = '%s · %s' % (v.device_type, path)
-        user_display = None
-        if v.user_id:
-            u = db.session.get(User, v.user_id)
-            user_display = u.username if u else ('ID:%s' % v.user_id)
-            user_phone = getattr(u, 'phone', None) if u else None
-        else:
-            user_display = '匿名'
-            user_phone = None
-        out.append({
-            'id': v.id,
-            'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
-            'path': path,
-            'ip_address': v.ip_address,
-            'location': _format_location(v.country, v.region, v.city),
-            'user_id': v.user_id,
-            'username': user_display,
-            'phone': user_phone,
-            'device_type': v.device_type or 'unknown',
-            'user_agent': (v.user_agent[:80] + '…') if v.user_agent and len(v.user_agent) > 80 else v.user_agent,
-        })
-    return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
+    try:
+        admin_user, err = _require_admin()
+        if err is not None:
+            return err[0], err[1]
+        page = max(1, int(request.args.get('page') or 1))
+        page_size = min(50, max(1, int(request.args.get('page_size') or 20)))
+        offset = (page - 1) * page_size
+        q = PageVisit.query.order_by(PageVisit.created_at.desc())
+        try:
+            total = q.count()
+        except Exception as e:
+            print('[FreeYourPDF] api_admin_access_logs count 异常:', str(e), flush=True)
+            total = 0
+        try:
+            items = q.offset(offset).limit(page_size).all()
+        except Exception as e:
+            print('[FreeYourPDF] api_admin_access_logs query 异常:', str(e), flush=True)
+            items = []
+        out = []
+        for v in items:
+            try:
+                path = v.ip_address or '—'
+                if v.device_type:
+                    path = '%s · %s' % (v.device_type, path)
+                user_display = None
+                if v.user_id:
+                    u = db.session.get(User, v.user_id)
+                    user_display = u.username if u else ('ID:%s' % v.user_id)
+                    user_phone = getattr(u, 'phone', None) if u else None
+                else:
+                    user_display = '匿名'
+                    user_phone = None
+                # 确保所有字段都有值，避免前端显示问题
+                out.append({
+                    'id': v.id,
+                    'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
+                    'path': path or '—',
+                    'ip_address': v.ip_address or '—',
+                    'location': _format_location(v.country, v.region, v.city),
+                    'user_id': v.user_id,
+                    'username': user_display or '匿名',
+                    'phone': user_phone or None,
+                    'device_type': v.device_type or 'unknown',
+                    'user_agent': (v.user_agent[:80] + '…') if v.user_agent and len(v.user_agent) > 80 else (v.user_agent or '—'),
+                })
+            except Exception as e:
+                print('[FreeYourPDF] api_admin_access_logs 处理单条记录异常:', str(e), flush=True)
+                # 即使单条记录出错，也继续处理其他记录
+                out.append({
+                    'id': v.id,
+                    'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
+                    'path': getattr(v, 'ip_address', '—'),
+                    'ip_address': getattr(v, 'ip_address', None),
+                    'location': '—',
+                    'user_id': getattr(v, 'user_id', None),
+                    'username': '—',
+                    'phone': None,
+                    'device_type': getattr(v, 'device_type', 'unknown'),
+                    'user_agent': None,
+                })
+        return jsonify({'status': 'success', 'data': out, 'total': total, 'page': page, 'page_size': page_size})
+    except Exception as e:
+        import traceback
+        err_msg = '获取访问记录失败：' + str(e)
+        print('[FreeYourPDF] api_admin_access_logs 异常:', err_msg, flush=True)
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+        return jsonify({'status': 'error', 'error': err_msg}), 500
 
 
 @app.route('/api/admin/usage-logs', methods=['GET'])
@@ -1408,16 +1557,17 @@ def api_admin_usage_logs():
                     user_display = '匿名'
                     user_phone = None
                 type_label = {'encrypt': '加密', 'unlock': '解锁', 'compress': '体积优化'}.get(r.usage_type, r.usage_type or '—')
+                # 确保所有字段都有值，避免前端显示问题
                 out.append({
                     'id': r.id,
                     'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
                     'user_id': r.user_id,
-                    'username': user_display,
-                    'phone': user_phone,
-                    'type': type_label,
-                    'usage_type': r.usage_type,
-                    'api_endpoint': r.api_endpoint,
-                    'ip_address': r.ip_address,
+                    'username': user_display or '匿名',
+                    'phone': user_phone or None,
+                    'type': type_label or '—',
+                    'usage_type': r.usage_type or '—',
+                    'api_endpoint': r.api_endpoint or '—',
+                    'ip_address': r.ip_address or '—',
                     'location': _format_location(getattr(r, 'country', None), getattr(r, 'region', None), getattr(r, 'city', None)),
                 })
             except Exception as e:
@@ -2305,8 +2455,12 @@ def api_crack_and_unlock():
         stream_with_context(generate()),
         mimetype='text/event-stream',
         headers={
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no'  # 禁用 nginx 缓冲
+            'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'X-Accel-Buffering': 'no',  # 禁用 nginx 缓冲
+            'Connection': 'keep-alive',  # 保持连接（SSE 需要）
+            'X-Content-Type-Options': 'nosniff',  # Cloudflare 兼容性
         }
     )
 
