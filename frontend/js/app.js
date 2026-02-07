@@ -547,12 +547,33 @@
     try {
       var form = new FormData();
       form.append('file', file);
-      var res = await fetch(API_BASE + '/api/detect', { method: 'POST', body: form });
-      if (res.ok) {
-        var json = await res.json();
-        return { encrypted: json.encrypted, hasRestrictions: json.hasRestrictions };
+      // 添加超时处理（30秒超时）
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function () {
+        controller.abort();
+      }, 30000);
+      
+      try {
+        var res = await fetch(API_BASE + '/api/detect', {
+          method: 'POST',
+          body: form,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          var json = await res.json();
+          return { encrypted: json.encrypted, hasRestrictions: json.hasRestrictions };
+        }
+      } catch (e) {
+        clearTimeout(timeoutId);
+        if (e.name === 'AbortError') {
+          console.warn('[FreeYourPDF] PDF检测超时，使用前端检测');
+        }
+        throw e;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[FreeYourPDF] 后端检测失败，使用前端检测:', e);
+    }
     return null;
   }
 
@@ -1286,15 +1307,30 @@
     if (!item || !item.file) return;
 
     showEncryptProgress(true, 0, '加密中…');
+    var startTime = Date.now();
     var progressInterval = setInterval(function () {
       var bar = document.getElementById('encryptProgressBar');
       var percentEl = document.getElementById('encryptProgressPercent');
       var w = parseFloat(bar ? bar.style.width : '0') || 0;
-      if (w < 75) {
-        w = Math.min(75, w + 8);
-        if (bar) bar.style.width = w + '%';
-        if (percentEl) percentEl.textContent = Math.round(w) + '%';
+      var elapsed = Date.now() - startTime;
+      
+      // 优化进度更新逻辑：
+      // - 前3秒快速到70%
+      // - 3-10秒缓慢到85%
+      // - 10秒后到95%，等待后端完成
+      if (elapsed < 3000) {
+        // 前3秒：快速到70%
+        w = Math.min(70, w + 10);
+      } else if (elapsed < 10000) {
+        // 3-10秒：缓慢到85%
+        w = Math.min(85, w + 2);
+      } else {
+        // 10秒后：缓慢到95%，等待后端完成
+        w = Math.min(95, w + 0.5);
       }
+      
+      if (bar) bar.style.width = w + '%';
+      if (percentEl) percentEl.textContent = Math.round(w) + '%';
       clearProgressIntervalIfDone();
     }, 200);
     function clearProgressIntervalIfDone() {
@@ -1913,20 +1949,38 @@
     var visitsBody = document.getElementById('adminMonitorRecentVisitsBody');
     if (visitsBody) {
       visitsBody.innerHTML = '';
-      (d.recent_visits || []).forEach(function (r) {
-        var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || '-') + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td>';
-        visitsBody.appendChild(tr);
-      });
+      var visits = d.recent_visits || [];
+      if (visits.length === 0) {
+        visitsBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">暂无最近访问记录</td></tr>';
+      } else {
+        visits.forEach(function (r) {
+          try {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || '-') + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td>';
+            visitsBody.appendChild(tr);
+          } catch (e) {
+            console.error('[FreeYourPDF] 渲染访问记录异常:', e, r);
+          }
+        });
+      }
     }
     var usageBody = document.getElementById('adminMonitorRecentUsageBody');
     if (usageBody) {
       usageBody.innerHTML = '';
-      (d.recent_usage || []).forEach(function (r) {
-        var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
-        usageBody.appendChild(tr);
-      });
+      var usages = d.recent_usage || [];
+      if (usages.length === 0) {
+        usageBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">暂无最近使用记录</td></tr>';
+      } else {
+        usages.forEach(function (r) {
+          try {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
+            usageBody.appendChild(tr);
+          } catch (e) {
+            console.error('[FreeYourPDF] 渲染使用记录异常:', e, r);
+          }
+        });
+      }
     }
   }
   async function loadAdminCost() {

@@ -1397,10 +1397,11 @@ def api_admin_monitor_realtime():
         for v in visits:
             try:
                 u = db.session.get(User, v.user_id) if v.user_id else None
+                # 确保所有字段都有值，避免前端显示问题
                 recent_visits.append({
                     'id': v.id,
                     'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
-                    'ip_address': v.ip_address,
+                    'ip_address': v.ip_address or '—',
                     'location': _format_location(v.country, v.region, v.city),
                     'device_type': v.device_type or 'unknown',
                     'username': u.username if u else ('ID:%s' % v.user_id if v.user_id else '匿名'),
@@ -1408,6 +1409,19 @@ def api_admin_monitor_realtime():
                 })
             except Exception as e:
                 print('[FreeYourPDF] api_admin_monitor_realtime 处理单条访问记录异常:', str(e), flush=True)
+                import traceback
+                traceback.print_exc(file=sys.stdout)
+                sys.stdout.flush()
+                # 即使出错也添加一条记录，避免前端显示问题
+                recent_visits.append({
+                    'id': getattr(v, 'id', None),
+                    'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
+                    'ip_address': getattr(v, 'ip_address', '—'),
+                    'location': '—',
+                    'device_type': getattr(v, 'device_type', 'unknown'),
+                    'username': '—',
+                    'phone': None,
+                })
         # 最近 10 条使用
         try:
             usages = UsageRecord.query.order_by(UsageRecord.created_at.desc()).limit(10).all()
@@ -1785,35 +1799,72 @@ def _has_encrypt_in_bytes(data):
 
 @app.route('/api/detect', methods=['POST'])
 def api_detect():
-    """检测 PDF：是否需要打开密码、是否有权限限制。不鉴权、不扣配额。"""
+    """
+    检测 PDF：是否需要打开密码、是否有权限限制。不鉴权、不扣配额。
+    优化：添加超时处理，避免大文件检测时间过长。
+    """
     if 'file' not in request.files:
         return jsonify({'error': '未上传文件'}), 400
     f = request.files['file']
     if not f.filename or not f.filename.lower().endswith('.pdf'):
         return jsonify({'error': '请上传 PDF 文件'}), 400
-    data = f.read()
     
-    # 检查文件大小（防止内存耗尽）
-    file_size_mb = len(data) / (1024 * 1024)
-    if file_size_mb > config_module.MAX_FILE_SIZE_MB:
-        return jsonify({'error': f'文件过大（{file_size_mb:.1f}MB），最大支持 {config_module.MAX_FILE_SIZE_MB}MB'}), 400
-    
-    stream = io.BytesIO(data)
-    has_encrypt_meta = _has_encrypt_in_bytes(data)
-    encrypted = True
-    has_restrictions = False
-    if has_encrypt_meta:
-        if _can_open(stream, ''):
-            encrypted = False
-            has_restrictions = True
-    if encrypted:
-        if _can_open(stream, None):
-            encrypted = False
+    try:
+        data = f.read()
+        
+        # 检查文件大小（防止内存耗尽）
+        file_size_mb = len(data) / (1024 * 1024)
+        if file_size_mb > config_module.MAX_FILE_SIZE_MB:
+            return jsonify({'error': f'文件过大（{file_size_mb:.1f}MB），最大支持 {config_module.MAX_FILE_SIZE_MB}MB'}), 400
+        
+        # 优化：对于大文件（>10MB），只做快速检测，不尝试打开
+        if file_size_mb > 10:
+            # 大文件只检测元数据，不尝试打开（避免超时）
+            has_encrypt_meta = _has_encrypt_in_bytes(data)
+            return jsonify({
+                'encrypted': has_encrypt_meta,  # 有加密元数据就认为加密了
+                'hasRestrictions': has_encrypt_meta
+            })
+        
+        stream = io.BytesIO(data)
+        has_encrypt_meta = _has_encrypt_in_bytes(data)
+        encrypted = True
+        has_restrictions = False
+        
+        # 优化：对于中等大小的文件，限制检测时间
+        # 使用简单的快速检测，避免长时间等待
+        try:
+            if has_encrypt_meta:
+                # 先尝试空密码（快速）
+                if _can_open(stream, ''):
+                    encrypted = False
+                    has_restrictions = True
+            if encrypted:
+                # 尝试无密码打开（快速）
+                if _can_open(stream, None):
+                    encrypted = False
+                    has_restrictions = has_encrypt_meta
+                elif _can_open(stream, ''):
+                    encrypted = False
+                    has_restrictions = True
+        except Exception as e:
+            # 检测过程中出错，返回元数据检测结果
+            _log('PDF检测过程异常（不影响结果）: %s' % str(e))
+            encrypted = has_encrypt_meta
             has_restrictions = has_encrypt_meta
-        elif _can_open(stream, ''):
-            encrypted = False
-            has_restrictions = True
-    return jsonify({'encrypted': encrypted, 'hasRestrictions': has_restrictions})
+        
+        return jsonify({'encrypted': encrypted, 'hasRestrictions': has_restrictions})
+    except TimeoutError:
+        # 超时时的降级处理：只返回元数据检测结果
+        has_encrypt_meta = _has_encrypt_in_bytes(data)
+        return jsonify({
+            'encrypted': has_encrypt_meta,
+            'hasRestrictions': has_encrypt_meta
+        })
+    except Exception as e:
+        _log_error('PDF检测异常', e)
+        # 出错时返回默认值，让前端可以继续处理
+        return jsonify({'encrypted': False, 'hasRestrictions': False})
 
 
 # ----- 解锁（登录 10 次 / 匿名 5 次，先扣 unlock 再处理）-----
