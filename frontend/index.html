@@ -412,22 +412,12 @@
       </div>
       <div class="admin-panel" id="adminPanelMonitor" data-admin-panel="monitor" style="display:none;">
         <h2 class="admin-section-title">实时监控</h2>
-        <p class="admin-section-desc">近 1 小时 / 24 小时指标与最新访问、使用流水（每 5 秒自动刷新）</p>
+        <p class="admin-section-desc">近 1 小时 / 24 小时指标（每 5 秒自动刷新）</p>
         <div class="admin-stats-cards" id="adminMonitorCards">
           <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorUsage1h">0</span><span class="admin-stat-label">近 1h 使用次数</span></div>
           <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorUsage24h">0</span><span class="admin-stat-label">近 24h 使用次数</span></div>
           <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorVisits1h">0</span><span class="admin-stat-label">近 1h 访问量</span></div>
           <div class="admin-stat-card"><span class="admin-stat-value" id="adminMonitorVisits24h">0</span><span class="admin-stat-label">近 24h 访问量</span></div>
-        </div>
-        <div class="admin-realtime-grid">
-          <div class="admin-realtime-block">
-            <h3 class="admin-subtitle">最近访问</h3>
-            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>IP</th><th>位置</th><th>设备</th><th>用户</th><th>手机号</th></tr></thead><tbody id="adminMonitorRecentVisitsBody"></tbody></table></div>
-          </div>
-          <div class="admin-realtime-block">
-            <h3 class="admin-subtitle">最近使用</h3>
-            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>用户</th><th>手机号</th><th>类型</th><th>IP</th><th>位置</th></tr></thead><tbody id="adminMonitorRecentUsageBody"></tbody></table></div>
-          </div>
         </div>
         <p class="admin-monitor-tip">每 5 秒自动刷新</p>
       </div>

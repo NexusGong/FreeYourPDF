@@ -1938,60 +1938,14 @@
   }
   async function loadAdminMonitor() {
     var res = await fetchWithAuth(API_BASE + '/api/admin/monitor/realtime');
-    if (!res.ok) {
-      console.error('[FreeYourPDF] loadAdminMonitor 请求失败:', res.status, res.statusText);
-      return;
-    }
+    if (!res.ok) return;
     var json = await res.json();
-    console.log('[FreeYourPDF] loadAdminMonitor 收到数据:', json);
     var d = json.data || {};
-    console.log('[FreeYourPDF] loadAdminMonitor 访问记录数量:', d.recent_visits ? d.recent_visits.length : 'undefined', d.recent_visits);
-    console.log('[FreeYourPDF] loadAdminMonitor 使用记录数量:', d.recent_usage ? d.recent_usage.length : 'undefined', d.recent_usage);
     var el;
     if (el = document.getElementById('adminMonitorUsage1h')) el.textContent = d.recent_usage_1h != null ? d.recent_usage_1h : 0;
     if (el = document.getElementById('adminMonitorUsage24h')) el.textContent = d.recent_usage_24h != null ? d.recent_usage_24h : 0;
     if (el = document.getElementById('adminMonitorVisits1h')) el.textContent = d.recent_visits_1h != null ? d.recent_visits_1h : 0;
     if (el = document.getElementById('adminMonitorVisits24h')) el.textContent = d.recent_visits_24h != null ? d.recent_visits_24h : 0;
-    var visitsBody = document.getElementById('adminMonitorRecentVisitsBody');
-    if (visitsBody) {
-      visitsBody.innerHTML = '';
-      var visits = d.recent_visits || [];
-      console.log('[FreeYourPDF] loadAdminMonitor 准备渲染访问记录，数量:', visits.length);
-      if (visits.length === 0) {
-        visitsBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">暂无最近访问记录</td></tr>';
-      } else {
-        visits.forEach(function (r, index) {
-          try {
-            console.log('[FreeYourPDF] loadAdminMonitor 渲染访问记录', index, r);
-            var tr = document.createElement('tr');
-            tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td><td>' + (r.device_type || '-') + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td>';
-            visitsBody.appendChild(tr);
-          } catch (e) {
-            console.error('[FreeYourPDF] 渲染访问记录异常:', e, r);
-          }
-        });
-      }
-    } else {
-      console.error('[FreeYourPDF] loadAdminMonitor 找不到 adminMonitorRecentVisitsBody 元素');
-    }
-    var usageBody = document.getElementById('adminMonitorRecentUsageBody');
-    if (usageBody) {
-      usageBody.innerHTML = '';
-      var usages = d.recent_usage || [];
-      if (usages.length === 0) {
-        usageBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">暂无最近使用记录</td></tr>';
-      } else {
-        usages.forEach(function (r) {
-          try {
-            var tr = document.createElement('tr');
-            tr.innerHTML = '<td>' + formatLocalTime(r.created_at) + '</td><td>' + (r.username || '-') + '</td><td>' + (r.phone || '-') + '</td><td>' + (r.type || '-') + '</td><td>' + (r.ip_address || '-') + '</td><td>' + (r.location || '-') + '</td>';
-            usageBody.appendChild(tr);
-          } catch (e) {
-            console.error('[FreeYourPDF] 渲染使用记录异常:', e, r);
-          }
-        });
-      }
-    }
   }
   async function loadAdminCost() {
     var res = await fetchWithAuth(API_BASE + '/api/admin/stats');
@@ -2546,20 +2500,13 @@
     // API_BASE 为空字符串时表示同源，这是有效的，不应该跳过
     // 只有在 API_BASE 为 null 或 undefined 时才跳过
     if (API_BASE === null || API_BASE === undefined) {
-      console.log('[FreeYourPDF] recordVisit 跳过（API_BASE未定义）');
       return;
     }
-    console.log('[FreeYourPDF] recordVisit 开始记录访问，API_BASE:', API_BASE || '(同源)');
     fetchWithAuth(API_BASE + '/api/visit', {
       method: 'POST',
       body: { session_id: getAnonymousId() }
-    }).then(function (res) {
-      console.log('[FreeYourPDF] recordVisit 响应:', res.status, res.statusText);
-      return res.json().then(function (json) {
-        console.log('[FreeYourPDF] recordVisit 结果:', json);
-      });
     }).catch(function (e) {
-      console.error('[FreeYourPDF] recordVisit 失败:', e);
+      // 静默失败，避免日志刷屏
     });
   }
   recordVisit();

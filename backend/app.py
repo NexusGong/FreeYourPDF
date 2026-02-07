@@ -631,8 +631,6 @@ def api_visit():
         ua = request.headers.get('User-Agent') or ''
         parsed = _parse_device(ua)
         
-        print('[FreeYourPDF] api_visit 收到访问记录请求: user_id=%s, session_id=%s, ip=%s' % (user_id, session_id[:20] if session_id else None, ip), flush=True)
-        
         # 先快速创建记录（不等待地理位置查询）
         visit = PageVisit(
             session_id=session_id,
@@ -653,7 +651,6 @@ def api_visit():
         
         # 提交记录（快速响应）
         db.session.commit()
-        print('[FreeYourPDF] api_visit 访问记录已写入数据库: visit_id=%d' % visit_id, flush=True)
         
         # 异步更新地理位置信息（不阻塞响应）
         def _update_geo(geo):
@@ -1376,7 +1373,7 @@ def api_admin_stats():
 
 @app.route('/api/admin/monitor/realtime', methods=['GET'])
 def api_admin_monitor_realtime():
-    """实时监控：近 1h/24h 使用量、最近访问与使用记录。"""
+    """实时监控：近 1h/24h 使用量和访问量统计。"""
     try:
         admin_user, err = _require_admin()
         if err is not None:
@@ -1392,97 +1389,15 @@ def api_admin_monitor_realtime():
         except Exception as e:
             print('[FreeYourPDF] api_admin_monitor_realtime 统计查询异常:', str(e), flush=True)
             recent_usage_1h = recent_usage_24h = recent_visits_1h = recent_visits_24h = 0
-        # 最近 10 条访问
-        recent_visits = []  # 提前初始化，确保总是有值
-        try:
-            visits = PageVisit.query.order_by(PageVisit.created_at.desc()).limit(10).all()
-            print('[FreeYourPDF] api_admin_monitor_realtime 查询到 %d 条访问记录' % len(visits), flush=True)
-        except Exception as e:
-            print('[FreeYourPDF] api_admin_monitor_realtime 访问记录查询异常:', str(e), flush=True)
-            import traceback
-            traceback.print_exc(file=sys.stdout)
-            sys.stdout.flush()
-            visits = []
         
-        for v in visits:
-            try:
-                u = db.session.get(User, v.user_id) if v.user_id else None
-                # 确保所有字段都有值，避免前端显示问题
-                visit_item = {
-                    'id': v.id,
-                    'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
-                    'ip_address': v.ip_address or '—',
-                    'location': _format_location(v.country, v.region, v.city),
-                    'device_type': v.device_type or 'unknown',
-                    'username': u.username if u else ('ID:%s' % v.user_id if v.user_id else '匿名'),
-                    'phone': getattr(u, 'phone', None) if u else None,
-                }
-                recent_visits.append(visit_item)
-            except Exception as e:
-                print('[FreeYourPDF] api_admin_monitor_realtime 处理单条访问记录异常:', str(e), flush=True)
-                import traceback
-                traceback.print_exc(file=sys.stdout)
-                sys.stdout.flush()
-                # 即使出错也添加一条记录，避免前端显示问题
-                try:
-                    recent_visits.append({
-                        'id': getattr(v, 'id', None),
-                        'created_at': v.created_at.isoformat() + 'Z' if v.created_at else None,
-                        'ip_address': getattr(v, 'ip_address', '—'),
-                        'location': '—',
-                        'device_type': getattr(v, 'device_type', 'unknown'),
-                        'username': '—',
-                        'phone': None,
-                    })
-                except Exception as e2:
-                    print('[FreeYourPDF] api_admin_monitor_realtime 添加错误记录也失败:', str(e2), flush=True)
-        
-        print('[FreeYourPDF] api_admin_monitor_realtime 最终返回 %d 条访问记录' % len(recent_visits), flush=True)
-        # 最近 10 条使用
-        recent_usage = []  # 提前初始化，确保总是有值
-        try:
-            usages = UsageRecord.query.order_by(UsageRecord.created_at.desc()).limit(10).all()
-            print('[FreeYourPDF] api_admin_monitor_realtime 查询到 %d 条使用记录' % len(usages), flush=True)
-        except Exception as e:
-            print('[FreeYourPDF] api_admin_monitor_realtime 使用记录查询异常:', str(e), flush=True)
-            import traceback
-            traceback.print_exc(file=sys.stdout)
-            sys.stdout.flush()
-            usages = []
-        for r in usages:
-            try:
-                u = db.session.get(User, r.user_id) if r.user_id else None
-                type_label = {'encrypt': '加密', 'unlock': '解锁', 'compress': '体积优化'}.get(r.usage_type, r.usage_type or '—')
-                recent_usage.append({
-                    'id': r.id,
-                    'created_at': r.created_at.isoformat() + 'Z' if r.created_at else None,
-                    'username': u.username if u else ('ID:%s' % r.user_id if r.user_id else '匿名'),
-                    'phone': getattr(u, 'phone', None) if u else None,
-                    'type': type_label,
-                    'usage_type': r.usage_type,
-                    'ip_address': r.ip_address,
-                    'location': _format_location(getattr(r, 'country', None), getattr(r, 'region', None), getattr(r, 'city', None)),
-                })
-            except Exception as e:
-                print('[FreeYourPDF] api_admin_monitor_realtime 处理单条使用记录异常:', str(e), flush=True)
-                import traceback
-                traceback.print_exc(file=sys.stdout)
-                sys.stdout.flush()
-        
-        print('[FreeYourPDF] api_admin_monitor_realtime 最终返回 %d 条使用记录' % len(recent_usage), flush=True)
-        # 确保所有字段都存在，即使为空数组
-        result_data = {
-            'recent_usage_1h': recent_usage_1h,
-            'recent_usage_24h': recent_usage_24h,
-            'recent_visits_1h': recent_visits_1h,
-            'recent_visits_24h': recent_visits_24h,
-            'recent_visits': recent_visits if 'recent_visits' in locals() else [],
-            'recent_usage': recent_usage if 'recent_usage' in locals() else [],
-        }
-        print('[FreeYourPDF] api_admin_monitor_realtime 返回数据: visits=%d, usage=%d' % (len(result_data['recent_visits']), len(result_data['recent_usage'])), flush=True)
         return jsonify({
             'status': 'success',
-            'data': result_data,
+            'data': {
+                'recent_usage_1h': recent_usage_1h,
+                'recent_usage_24h': recent_usage_24h,
+                'recent_visits_1h': recent_visits_1h,
+                'recent_visits_24h': recent_visits_24h,
+            },
         })
     except Exception as e:
         import traceback
@@ -1506,7 +1421,6 @@ def api_admin_access_logs():
         q = PageVisit.query.order_by(PageVisit.created_at.desc())
         try:
             total = q.count()
-            print('[FreeYourPDF] api_admin_access_logs 查询到总数: %d' % total, flush=True)
         except Exception as e:
             print('[FreeYourPDF] api_admin_access_logs count 异常:', str(e), flush=True)
             import traceback
@@ -1515,7 +1429,6 @@ def api_admin_access_logs():
             total = 0
         try:
             items = q.offset(offset).limit(page_size).all()
-            print('[FreeYourPDF] api_admin_access_logs 查询到 %d 条记录（offset=%d, limit=%d）' % (len(items), offset, page_size), flush=True)
         except Exception as e:
             print('[FreeYourPDF] api_admin_access_logs query 异常:', str(e), flush=True)
             import traceback
